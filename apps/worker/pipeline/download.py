@@ -20,6 +20,16 @@ def download_audio(video_id: str, out_dir: str) -> tuple[str, float]:
         "no_warnings": True,
     }
 
+    # YouTube's bot-detection ("Sign in to confirm you're not a bot")
+    # triggers occasionally for anonymous requests. Pointing yt-dlp at a
+    # real browser's cookies makes requests look like a logged-in session,
+    # which YouTube trusts far more. Optional — most downloads work without
+    # it. Chrome/Edge must be fully closed for yt-dlp to read their cookie
+    # DB (it's locked while the browser is running).
+    cookies_browser = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
+    if cookies_browser:
+        ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
 

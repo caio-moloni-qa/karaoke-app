@@ -59,3 +59,12 @@ hundred MB each, one-time).
 
 First run will be slow while models download; after that, separation speed
 depends on your GPU.
+
+## Troubleshooting
+
+**`ERROR: [youtube] ...: Sign in to confirm you're not a bot`** — YouTube's
+anti-bot check triggering on an anonymous request; happens occasionally, not
+a bug. Set `YTDLP_COOKIES_FROM_BROWSER` in `.env` to a browser you're logged
+into YouTube with (`chrome`, `edge`, `firefox`, ...) — that browser needs to
+be fully closed while the worker downloads, since yt-dlp reads its cookie
+database directly and it's locked while the browser is running.
