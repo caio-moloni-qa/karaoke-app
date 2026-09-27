@@ -38,6 +38,11 @@ export default function RoomRemotePage() {
   const [library, setLibrary] = useState<Song[]>([]);
   const [queue, setQueue] = useState<QueueItemWithSong[]>([]);
 
+  const [autoMode, setAutoMode] = useState(true);
+  const [autoQuery, setAutoQuery] = useState("");
+  const [autoSubmitting, setAutoSubmitting] = useState(false);
+  const [autoResultMsg, setAutoResultMsg] = useState<string | null>(null);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<YoutubeSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -139,6 +144,30 @@ export default function RoomRemotePage() {
       setSearchResults(data.results ?? []);
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function requestSongAutomatic() {
+    const q = autoQuery.trim();
+    if (!q || !guest) return;
+    setAutoSubmitting(true);
+    setAutoResultMsg(null);
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/songs/auto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, guestId: guest.guestId, clientToken: guest.clientToken }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAutoResultMsg(`Adicionado: ${data.matchedTitle}`);
+        setAutoQuery("");
+        await loadQueue();
+      } else {
+        setAutoResultMsg(data.error ?? "Não foi possível adicionar essa música.");
+      }
+    } finally {
+      setAutoSubmitting(false);
     }
   }
 
@@ -297,53 +326,98 @@ export default function RoomRemotePage() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted">
-          <Search className="h-4 w-4" /> Buscar no YouTube
-        </h2>
-        <div className="flex gap-2">
-          <input
-            className="flex-1 rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent"
-            placeholder="Nome da música ou artista"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && runSearch()}
-          />
-          <Button
-            variant="secondary"
-            disabled={!searchQuery.trim()}
-            loading={searching}
-            onClick={runSearch}
-            icon={<Search className="h-4 w-4" />}
-          >
-            Buscar
-          </Button>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted">
+            <Search className="h-4 w-4" /> Adicionar música
+          </h2>
+          <div className="flex rounded-full border border-border p-0.5 text-xs">
+            <button
+              className={`rounded-full px-3 py-1 transition-colors ${autoMode ? "bg-gradient-to-r from-accent to-accent-2 text-accent-foreground" : "text-muted"}`}
+              onClick={() => setAutoMode(true)}
+            >
+              Automático
+            </button>
+            <button
+              className={`rounded-full px-3 py-1 transition-colors ${!autoMode ? "bg-surface-hover text-foreground" : "text-muted"}`}
+              onClick={() => setAutoMode(false)}
+            >
+              Manual
+            </button>
+          </div>
         </div>
-        <ul className="flex flex-col gap-2">
-          {searchResults.map((result) => (
-            <li key={result.videoId} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
-              {result.thumbnailUrl && (
-                // eslint-disable-next-line @next/next/no-img-element -- thumbnails are external, unsized YouTube URLs
-                <img src={result.thumbnailUrl} alt="" className="h-12 w-16 shrink-0 rounded-lg object-cover" />
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{result.title}</p>
-                <p className="truncate text-xs text-muted">{result.channelTitle}</p>
-              </div>
-              <IconButton
-                variant="ghost"
-                icon={<Volume2 className="h-4 w-4" />}
-                aria-label="Ouvir prévia de 5s"
-                onClick={() => preview(result.videoId, result.durationSeconds)}
+
+        {autoMode ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <input
+                className="flex-1 rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+                placeholder="Nome da música ou artista"
+                value={autoQuery}
+                onChange={(e) => setAutoQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && requestSongAutomatic()}
               />
-              <IconButton
-                icon={<Plus className="h-4 w-4" />}
-                aria-label="Adicionar à fila"
-                loading={pendingVideoIds.has(result.videoId)}
-                onClick={() => requestSong(result)}
+              <Button
+                disabled={!autoQuery.trim()}
+                loading={autoSubmitting}
+                onClick={requestSongAutomatic}
+                icon={<Sparkles className="h-4 w-4" />}
+              >
+                Adicionar
+              </Button>
+            </div>
+            <p className="text-xs text-muted">
+              Pega o primeiro resultado do YouTube e a letra automaticamente — sem precisar escolher.
+            </p>
+            {autoResultMsg && <p className="text-sm">{autoResultMsg}</p>}
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+                placeholder="Nome da música ou artista"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && runSearch()}
               />
-            </li>
-          ))}
-        </ul>
+              <Button
+                variant="secondary"
+                disabled={!searchQuery.trim()}
+                loading={searching}
+                onClick={runSearch}
+                icon={<Search className="h-4 w-4" />}
+              >
+                Buscar
+              </Button>
+            </div>
+            <ul className="flex flex-col gap-2">
+              {searchResults.map((result) => (
+                <li key={result.videoId} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
+                  {result.thumbnailUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element -- thumbnails are external, unsized YouTube URLs
+                    <img src={result.thumbnailUrl} alt="" className="h-12 w-16 shrink-0 rounded-lg object-cover" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{result.title}</p>
+                    <p className="truncate text-xs text-muted">{result.channelTitle}</p>
+                  </div>
+                  <IconButton
+                    variant="ghost"
+                    icon={<Volume2 className="h-4 w-4" />}
+                    aria-label="Ouvir prévia de 5s"
+                    onClick={() => preview(result.videoId, result.durationSeconds)}
+                  />
+                  <IconButton
+                    icon={<Plus className="h-4 w-4" />}
+                    aria-label="Adicionar à fila"
+                    loading={pendingVideoIds.has(result.videoId)}
+                    onClick={() => requestSong(result)}
+                  />
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </section>
 
       <section className="flex flex-col gap-3">

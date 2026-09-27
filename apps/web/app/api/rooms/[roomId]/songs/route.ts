@@ -1,5 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { findOrCreateSong } from "@/lib/songs";
+import { autoSaveLyrics } from "@/lib/autoLyrics";
 
 interface RequestSongBody {
   videoId: string;
@@ -38,48 +40,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ roo
     return NextResponse.json({ error: "Not a guest of this room" }, { status: 403 });
   }
 
-  let song = await supabase
-    .from("songs")
-    .select("id, status")
-    .eq("youtube_video_id", videoId)
-    .maybeSingle()
-    .then((res) => res.data);
-
-  if (!song) {
-    const { data: inserted, error: insertError } = await supabase
-      .from("songs")
-      .insert({
-        youtube_video_id: videoId,
-        title,
-        artist_guess: channelTitle,
-        duration_seconds: durationSeconds,
-        thumbnail_url: thumbnailUrl,
-        status: "queued",
-      })
-      .select("id, status")
-      .single();
-
-    if (insertError || !inserted) {
-      return NextResponse.json({ error: "Failed to create song" }, { status: 500 });
-    }
-    song = inserted;
-
-    await supabase.from("processing_jobs").insert({
-      song_id: song.id,
-      room_id: roomId,
-      requested_by: guestId,
-      status: "queued",
-    });
-  } else if (song.status === "failed") {
-    // Retry: send it back through the pipeline.
-    await supabase.from("songs").update({ status: "queued" }).eq("id", song.id);
-    await supabase.from("processing_jobs").insert({
-      song_id: song.id,
-      room_id: roomId,
-      requested_by: guestId,
-      status: "queued",
-    });
+  let song;
+  try {
+    song = await findOrCreateSong({ videoId, title, channelTitle, durationSeconds, thumbnailUrl }, roomId, guestId);
+  } catch {
+    return NextResponse.json({ error: "Failed to create song" }, { status: 500 });
   }
+
+  after(() => autoSaveLyrics(song.id, title, channelTitle, durationSeconds).catch(() => {}));
 
   const { data: queueItem, error: queueError } = await supabase
     .from("queue_items")
