@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Monitor, Smartphone, Sparkles } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import type { Room } from "@/lib/types";
 
@@ -17,28 +18,36 @@ export default async function Home() {
   const roomList = (rooms as Room[]) ?? [];
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-6">
-      <h1 className="text-2xl font-semibold">Karaoke</h1>
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-8 px-6">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-r from-accent to-accent-2">
+          <Sparkles className="h-6 w-6 text-white" />
+        </div>
+        <h1 className="text-2xl font-semibold">Karaoke</h1>
+      </div>
 
       {roomList.length === 0 ? (
-        <p className="text-sm text-zinc-500">
+        <p className="text-center text-sm text-muted">
           Nenhuma sala encontrada. Rode o seed em <code>supabase/seed.sql</code> para criar a
-          sala de demonstração da MVP1 (veja o README).
+          sala de demonstração (veja o README).
         </p>
       ) : (
         <ul className="flex flex-col gap-3">
           {roomList.map((room) => (
-            <li
-              key={room.id}
-              className="flex items-center justify-between rounded border border-black/10 px-4 py-3 dark:border-white/10"
-            >
+            <li key={room.id} className="flex items-center justify-between rounded-2xl border border-border bg-surface px-5 py-4">
               <span className="font-medium">{room.name}</span>
-              <div className="flex gap-3 text-sm">
-                <Link className="underline" href={`/stage/${room.id}`}>
-                  Palco
+              <div className="flex gap-2 text-sm">
+                <Link
+                  href={`/stage/${room.id}`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 transition-colors hover:bg-surface-hover"
+                >
+                  <Monitor className="h-3.5 w-3.5" /> Palco
                 </Link>
-                <Link className="underline" href={`/room/${room.id}`}>
-                  Controle
+                <Link
+                  href={`/room/${room.id}`}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-accent to-accent-2 px-3 py-1.5 text-accent-foreground transition-opacity hover:opacity-90"
+                >
+                  <Smartphone className="h-3.5 w-3.5" /> Controle
                 </Link>
               </div>
             </li>

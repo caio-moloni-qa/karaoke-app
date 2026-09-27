@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
+import { Maximize, Minimize, Music2, Pause, Play, Trash2, Wifi, WifiOff } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
 import { useWorkerOnline } from "@/lib/useWorkerOnline";
@@ -10,13 +11,17 @@ import { currentLineIndex, parseLrc, type LrcLine } from "@/lib/lrc";
 import { latestProcessingJob, SONG_STATUS_LABEL, type QueueItemWithSong, type StemType } from "@/lib/types";
 import { ProgressBar } from "@/components/ProgressBar";
 import { LyricsView } from "@/components/LyricsView";
+import { MixerPanel } from "@/components/MixerPanel";
+import { Button, IconButton } from "@/components/Button";
 
-interface ArtSettings {
+interface Background {
   url: string;
   blur: number;
   opacity: number;
   contrast: number;
 }
+
+const DEFAULT_BG = { blur: 16, opacity: 0.55, contrast: 1 };
 
 const TRACKS: { type: StemType; label: string }[] = [
   { type: "instrumental", label: "Instrumental" },
@@ -41,13 +46,21 @@ export default function StagePage() {
     lead_vocal: 100,
     backing_vocal: 100,
   });
+  const [muted, setMuted] = useState<Record<StemType, boolean>>({
+    original: false,
+    instrumental: false,
+    lead_vocal: false,
+    backing_vocal: false,
+  });
   const [isPlaying, setIsPlaying] = useState(false);
   const [lyricsLines, setLyricsLines] = useState<LrcLine[]>([]);
   const [lyricsOffsetMs, setLyricsOffsetMs] = useState(0);
   const [currentLyricIdx, setCurrentLyricIdx] = useState(-1);
-  const [artSettings, setArtSettings] = useState<ArtSettings | null>(null);
+  const [background, setBackground] = useState<Background | null>(null);
   const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [startingNext, setStartingNext] = useState(false);
+  const [clearingQueue, setClearingQueue] = useState(false);
   const workerOnline = useWorkerOnline();
 
   const audioRefs = useRef<Partial<Record<StemType, HTMLAudioElement>>>({});
@@ -61,7 +74,7 @@ export default function StagePage() {
     const { data } = await supabase
       .from("queue_items")
       .select(
-        "*, songs(id, title, artist_guess, status, processing_jobs(status, stage_label, progress_pct, created_at)), guests(id, display_name)"
+        "*, songs(id, title, artist_guess, status, thumbnail_url, processing_jobs(status, stage_label, progress_pct, created_at)), guests(id, display_name)"
       )
       .eq("room_id", roomId)
       .in("status", ["queued", "now_playing"])
@@ -110,7 +123,7 @@ export default function StagePage() {
     }
   }
 
-  // Fetch signed stem URLs (+ lyrics, art, default mix) whenever the
+  // Fetch signed stem URLs (+ lyrics, background, default mix) whenever the
   // now-playing song changes.
   useEffect(() => {
     if (!nowPlaying || nowPlaying.song_id === currentSongIdRef.current) return;
@@ -118,7 +131,7 @@ export default function StagePage() {
     setIsPlaying(false);
     setLyricsLines([]);
     setCurrentLyricIdx(-1);
-    setArtSettings(null);
+    setBackground(null);
 
     fetch(`/api/songs/${nowPlaying.song_id}`)
       .then((res) => res.json())
@@ -130,11 +143,20 @@ export default function StagePage() {
           setLyricsOffsetMs(data.lyrics.offset_ms ?? 0);
         }
 
+        // Manually picked art wins; otherwise fall back to the YouTube
+        // thumbnail already on hand, so there's always a backdrop.
+        const bgUrl: string | null = data.displaySettings?.art_url || data.song?.thumbnail_url || null;
+        if (bgUrl) {
+          setBackground({
+            url: bgUrl,
+            blur: data.displaySettings?.blur ?? DEFAULT_BG.blur,
+            opacity: data.displaySettings?.opacity ?? DEFAULT_BG.opacity,
+            contrast: data.displaySettings?.contrast ?? DEFAULT_BG.contrast,
+          });
+        }
+
         if (data.displaySettings) {
           const ds = data.displaySettings;
-          if (ds.art_url) {
-            setArtSettings({ url: ds.art_url, blur: ds.blur, opacity: ds.opacity, contrast: ds.contrast });
-          }
           const defaultVolumes: Record<StemType, number> = {
             original: 0,
             instrumental: Math.round(ds.mix_instrumental_vol * 100),
@@ -168,7 +190,7 @@ export default function StagePage() {
       if (!el) continue;
       const source = context.createMediaElementSource(el);
       const gain = context.createGain();
-      gain.gain.value = volumes[type] / 100;
+      gain.gain.value = muted[type] ? 0 : volumes[type] / 100;
       source.connect(gain).connect(context.destination);
       gains[type] = gain;
     }
@@ -183,7 +205,16 @@ export default function StagePage() {
     // ref by design — mutating it directly is the sanctioned escape hatch,
     // not a render-purity violation.
     // eslint-disable-next-line react-hooks/immutability
-    if (gain) gain.gain.value = value / 100;
+    if (gain && !muted[type]) gain.gain.value = value / 100;
+  }
+
+  function toggleMute(type: StemType) {
+    setMuted((prev) => {
+      const next = { ...prev, [type]: !prev[type] };
+      const gain = mixerRef.current?.gains[type];
+      if (gain) gain.gain.value = next[type] ? 0 : volumes[type] / 100;
+      return next;
+    });
   }
 
   async function play() {
@@ -208,68 +239,94 @@ export default function StagePage() {
     }
     pause();
     setStemUrls({});
+    setBackground(null);
+    setLyricsLines([]);
     currentSongIdRef.current = null;
   }
 
   async function startNext() {
     const next = upNext[0];
     if (!next) return;
-    await supabase.from("queue_items").update({ status: "now_playing" }).eq("id", next.id);
+    setStartingNext(true);
+    try {
+      await supabase.from("queue_items").update({ status: "now_playing" }).eq("id", next.id);
+    } finally {
+      setStartingNext(false);
+    }
   }
 
   async function clearQueue() {
     if (!window.confirm("Limpar toda a fila da sala? Isso remove os pedidos de todo mundo.")) return;
-    pause();
-    setStemUrls({});
-    currentSongIdRef.current = null;
-    await supabase
-      .from("queue_items")
-      .update({ status: "removed" })
-      .eq("room_id", roomId)
-      .in("status", ["queued", "now_playing"]);
+    setClearingQueue(true);
+    try {
+      pause();
+      setStemUrls({});
+      setBackground(null);
+      setLyricsLines([]);
+      currentSongIdRef.current = null;
+      await supabase
+        .from("queue_items")
+        .update({ status: "removed" })
+        .eq("room_id", roomId)
+        .in("status", ["queued", "now_playing"]);
+    } finally {
+      setClearingQueue(false);
+    }
   }
 
-  return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center gap-10 px-8 py-12">
-      {artSettings && (
-        <div className="absolute inset-0 -z-10 overflow-hidden">
-          {/* eslint-disable-next-line @next/next/no-img-element -- external, unsized artwork used as a full-bleed backdrop */}
-          <img
-            src={artSettings.url}
-            alt=""
-            className="h-full w-full object-cover"
-            style={{ filter: `blur(${artSettings.blur}px) contrast(${artSettings.contrast * 100}%)` }}
-          />
-          <div className="absolute inset-0 bg-black" style={{ opacity: artSettings.opacity }} />
-        </div>
-      )}
+  const mixerTracks = TRACKS.map(({ type, label }) => ({
+    type,
+    label,
+    value: volumes[type],
+    muted: muted[type],
+  }));
 
-      <div className="absolute right-4 top-4 flex items-center gap-2">
+  return (
+    <main className="relative flex min-h-screen flex-col items-center justify-center gap-8 overflow-hidden px-8 py-12 pb-40">
+      <div className="fixed inset-0 -z-10 bg-background">
+        {background && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element -- external, unsized artwork used as a full-bleed backdrop */}
+            <img
+              src={background.url}
+              alt=""
+              className="h-full w-full scale-110 object-cover"
+              style={{ filter: `blur(${background.blur}px) contrast(${background.contrast * 100}%)` }}
+            />
+            <div className="absolute inset-0 bg-black" style={{ opacity: background.opacity }} />
+          </>
+        )}
+      </div>
+
+      <div className="fixed right-4 top-4 z-20 flex items-center gap-2">
         <span
-          className={`rounded px-2 py-1 text-xs ${workerOnline ? "bg-green-600/20 text-green-600" : "bg-red-600/20 text-red-600"}`}
+          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
+            workerOnline ? "bg-success/15 text-success" : "bg-danger/15 text-danger"
+          }`}
         >
+          {workerOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
           Worker {workerOnline ? "online" : "offline"}
         </span>
-        <button
-          className="rounded border border-black/20 px-3 py-1 text-xs text-zinc-500 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+        <IconButton
+          icon={isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+          aria-label={isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
           onClick={toggleFullscreen}
-        >
-          {isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
-        </button>
+        />
         {queue.length > 0 && (
-          <button
-            className="rounded border border-black/20 px-3 py-1 text-xs text-zinc-500 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+          <IconButton
+            variant="danger"
+            icon={<Trash2 className="h-4 w-4" />}
+            aria-label="Limpar fila"
+            loading={clearingQueue}
             onClick={clearQueue}
-          >
-            Limpar fila
-          </button>
+          />
         )}
       </div>
 
       {roomUrl && (
-        <div className="absolute left-4 top-4 flex flex-col items-center gap-1 rounded bg-white/90 p-2 dark:bg-black/70">
-          <QRCodeSVG value={roomUrl} size={96} />
-          <p className="text-[10px] text-zinc-600 dark:text-zinc-300">Escaneie para entrar</p>
+        <div className="fixed left-4 top-4 z-20 flex flex-col items-center gap-1 rounded-2xl bg-surface/90 p-3 shadow-lg backdrop-blur">
+          <QRCodeSVG value={roomUrl} size={88} bgColor="transparent" fgColor="currentColor" className="text-foreground" />
+          <p className="text-[10px] text-muted">Escaneie para entrar</p>
         </div>
       )}
 
@@ -288,21 +345,21 @@ export default function StagePage() {
 
       {!nowPlaying && (
         <div className="flex flex-col items-center gap-4 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface">
+            <Music2 className="h-7 w-7 text-muted" />
+          </div>
           <h1 className="text-2xl font-semibold">Nada tocando</h1>
           {upNext.length === 0 && (
-            <p className="text-zinc-500">Fila vazia — peça uma música pelo celular.</p>
+            <p className="text-muted">Fila vazia — peça uma música pelo celular.</p>
           )}
           {upNext.length > 0 && upNext[0].songs?.status === "ready" && (
-            <button
-              className="rounded bg-foreground px-6 py-3 text-background"
-              onClick={startNext}
-            >
+            <Button icon={<Play className="h-4 w-4" />} loading={startingNext} onClick={startNext} className="mt-2">
               Tocar próxima: {upNext[0].songs?.title}
-            </button>
+            </Button>
           )}
           {upNext.length > 0 && upNext[0].songs && upNext[0].songs.status !== "ready" && (
             <div className="flex w-full max-w-sm flex-col items-center gap-2">
-              <p className="text-zinc-500">
+              <p className="text-muted">
                 Próxima música ({upNext[0].songs.title}):{" "}
                 {upNext[0].songs.status === "failed"
                   ? SONG_STATUS_LABEL.failed
@@ -318,46 +375,31 @@ export default function StagePage() {
       )}
 
       {nowPlaying && (
-        <div className="flex w-full max-w-xl flex-col items-center gap-8">
+        <div className="flex w-full max-w-xl flex-col items-center gap-6">
           <div className="text-center">
-            <p className="text-sm text-zinc-500">Tocando agora</p>
+            <p className="text-sm font-medium uppercase tracking-wide text-muted">Tocando agora</p>
             <h1 className="text-3xl font-semibold">{nowPlaying.songs?.title}</h1>
-            {nowPlaying.songs?.artist_guess && (
-              <p className="text-zinc-500">{nowPlaying.songs.artist_guess}</p>
-            )}
+            {nowPlaying.songs?.artist_guess && <p className="text-muted">{nowPlaying.songs.artist_guess}</p>}
           </div>
 
           <LyricsView lines={lyricsLines} currentIndex={currentLyricIdx} />
 
           <button
-            className="rounded-full bg-foreground px-8 py-3 text-lg text-background"
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-accent to-accent-2 text-accent-foreground shadow-lg shadow-accent/30 transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
             onClick={isPlaying ? pause : play}
             disabled={!stemUrls.instrumental}
+            aria-label={isPlaying ? "Pausar" : "Tocar"}
           >
-            {isPlaying ? "Pausar" : "Tocar"}
+            {isPlaying ? <Pause className="h-7 w-7" /> : <Play className="ml-0.5 h-7 w-7" />}
           </button>
 
-          <div className="flex w-full flex-col gap-4">
-            {TRACKS.map(({ type, label }) => (
-              <label key={type} className="flex items-center gap-4">
-                <span className="w-40 text-sm text-zinc-500">{label}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={volumes[type]}
-                  onChange={(e) => setVolume(type, Number(e.target.value))}
-                  className="flex-1"
-                />
-              </label>
-            ))}
-          </div>
-
           {upNext.length > 0 && (
-            <p className="text-sm text-zinc-500">Próxima: {upNext[0].songs?.title}</p>
+            <p className="text-sm text-muted">Próxima: {upNext[0].songs?.title}</p>
           )}
         </div>
       )}
+
+      <MixerPanel tracks={mixerTracks} onVolumeChange={setVolume} onToggleMute={toggleMute} />
     </main>
   );
 }

@@ -87,7 +87,7 @@ export type SongProcessingSummary = Pick<ProcessingJob, "status" | "stage_label"
 
 export interface QueueItemWithSong extends QueueItem {
   songs:
-    | (Pick<Song, "id" | "title" | "artist_guess" | "status"> & {
+    | (Pick<Song, "id" | "title" | "artist_guess" | "status" | "thumbnail_url"> & {
         processing_jobs: SongProcessingSummary[];
       })
     | null;

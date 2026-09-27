@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { ArrowLeft, Check, Image as ImageIcon, Mic2, SlidersHorizontal, Video } from "lucide-react";
 import { currentLineIndex, parseLrc } from "@/lib/lrc";
 import type { StemType } from "@/lib/types";
+import { Button } from "@/components/Button";
 
 interface SongData {
-  song: { id: string; title: string; artist_guess: string | null };
+  song: { id: string; title: string; artist_guess: string | null; thumbnail_url: string | null };
   stems: Partial<Record<StemType, string>>;
   lyrics: { raw_lrc: string | null; offset_ms: number } | null;
   displaySettings: {
@@ -48,6 +50,7 @@ export default function SongEditorPage() {
 
   const [lyricsQuery, setLyricsQuery] = useState("");
   const [lyricsResults, setLyricsResults] = useState<LrclibResult[]>([]);
+  const [lyricsSearching, setLyricsSearching] = useState(false);
   const [selectedLrc, setSelectedLrc] = useState<string | null>(null);
   const [selectedLrclibId, setSelectedLrclibId] = useState<string | null>(null);
   const [offsetMs, setOffsetMs] = useState(0);
@@ -55,9 +58,10 @@ export default function SongEditorPage() {
 
   const [artQuery, setArtQuery] = useState("");
   const [artResults, setArtResults] = useState<ItunesResult[]>([]);
+  const [artSearching, setArtSearching] = useState(false);
   const [artUrl, setArtUrl] = useState<string | null>(null);
-  const [blur, setBlur] = useState(0);
-  const [opacity, setOpacity] = useState(60);
+  const [blur, setBlur] = useState(16);
+  const [opacity, setOpacity] = useState(55);
   const [contrast, setContrast] = useState(100);
   const [mixVols, setMixVols] = useState({ instrumental: 100, lead_vocal: 100, backing_vocal: 100 });
   const [displaySaving, setDisplaySaving] = useState(false);
@@ -93,11 +97,16 @@ export default function SongEditorPage() {
   async function searchLyrics() {
     const [title, ...artistParts] = lyricsQuery.split(" - ");
     const artist = artistParts.join(" - ") || data?.song.artist_guess || undefined;
-    const res = await fetch(
-      `/api/lrclib/search?title=${encodeURIComponent(title.trim())}${artist ? `&artist=${encodeURIComponent(artist)}` : ""}`
-    );
-    const json = await res.json();
-    setLyricsResults(json.results ?? []);
+    setLyricsSearching(true);
+    try {
+      const res = await fetch(
+        `/api/lrclib/search?title=${encodeURIComponent(title.trim())}${artist ? `&artist=${encodeURIComponent(artist)}` : ""}`
+      );
+      const json = await res.json();
+      setLyricsResults(json.results ?? []);
+    } finally {
+      setLyricsSearching(false);
+    }
   }
 
   function pickLyrics(result: LrclibResult) {
@@ -138,9 +147,14 @@ export default function SongEditorPage() {
   }
 
   async function searchArt() {
-    const res = await fetch(`/api/itunes/search?q=${encodeURIComponent(artQuery)}`);
-    const json = await res.json();
-    setArtResults(json.results ?? []);
+    setArtSearching(true);
+    try {
+      const res = await fetch(`/api/itunes/search?q=${encodeURIComponent(artQuery)}`);
+      const json = await res.json();
+      setArtResults(json.results ?? []);
+    } finally {
+      setArtSearching(false);
+    }
   }
 
   async function saveDisplaySettings() {
@@ -165,129 +179,149 @@ export default function SongEditorPage() {
   }
 
   if (!data) {
-    return <main className="min-h-screen" />;
+    return <main className="min-h-screen bg-background" />;
   }
 
   const previewLines = selectedLrc ? parseLrc(selectedLrc) : [];
+  const artChoices = [
+    ...(data.song.thumbnail_url ? [{ trackName: "Miniatura do YouTube", artistName: "", artworkUrl: data.song.thumbnail_url }] : []),
+    ...artResults,
+  ];
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-10 px-6 py-8">
-      <header>
-        <a href={`/room/${roomId}`} className="text-sm text-zinc-500 underline">
-          ← voltar para a sala
+    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-10 px-5 py-8">
+      <header className="flex flex-col gap-3">
+        <a
+          href={`/room/${roomId}`}
+          className="inline-flex w-fit items-center gap-1.5 text-sm text-muted transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" /> Voltar para a sala
         </a>
-        <h1 className="text-xl font-semibold">{data.song.title}</h1>
-        {data.song.artist_guess && <p className="text-zinc-500">{data.song.artist_guess}</p>}
+        <div>
+          <h1 className="text-xl font-semibold">{data.song.title}</h1>
+          {data.song.artist_guess && <p className="text-muted">{data.song.artist_guess}</p>}
+        </div>
+        {data.stems.instrumental && (
+          <audio ref={previewRef} src={data.stems.instrumental} controls onTimeUpdate={onPreviewTimeUpdate} className="w-full" />
+        )}
       </header>
 
-      {data.stems.instrumental && (
-        <audio
-          ref={previewRef}
-          src={data.stems.instrumental}
-          controls
-          onTimeUpdate={onPreviewTimeUpdate}
-          className="w-full"
-        />
-      )}
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">Letra (LRCLIB)</h2>
+      <section className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5">
+        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted">
+          <Mic2 className="h-4 w-4" /> Letra (LRCLIB)
+        </h2>
         <div className="flex gap-2">
           <input
-            className="flex-1 rounded border border-black/20 px-3 py-2 dark:border-white/20"
+            className="flex-1 rounded-xl border border-border bg-background px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent"
             value={lyricsQuery}
             onChange={(e) => setLyricsQuery(e.target.value)}
             placeholder="Título - Artista"
+            onKeyDown={(e) => e.key === "Enter" && searchLyrics()}
           />
-          <button className="rounded bg-foreground px-4 py-2 text-sm text-background" onClick={searchLyrics}>
+          <Button variant="secondary" loading={lyricsSearching} onClick={searchLyrics}>
             Buscar
-          </button>
+          </Button>
         </div>
-        <ul className="flex flex-col gap-2">
-          {lyricsResults.map((r) => (
-            <li
-              key={r.id}
-              className="flex items-center justify-between rounded border border-black/10 px-3 py-2 text-sm dark:border-white/10"
-            >
-              <span>
-                {r.trackName} — {r.artistName} ({formatDuration(r.duration)})
-                {!r.syncedLyrics && <span className="text-zinc-500"> · sem timestamps</span>}
-              </span>
-              <button
-                className="rounded border border-black/20 px-2 py-1 text-xs dark:border-white/20"
-                onClick={() => pickLyrics(r)}
-              >
-                usar
-              </button>
-            </li>
-          ))}
-        </ul>
+        {lyricsResults.length > 0 && (
+          <ul className="flex flex-col gap-2">
+            {lyricsResults.map((r) => (
+              <li key={r.id} className="flex items-center justify-between gap-2 rounded-xl bg-background px-3 py-2 text-sm">
+                <span className="min-w-0 truncate">
+                  {r.trackName} — {r.artistName} ({formatDuration(r.duration)})
+                  {!r.syncedLyrics && <span className="text-muted"> · sem timestamps</span>}
+                </span>
+                <Button variant="secondary" className="shrink-0 px-3 py-1 text-xs" onClick={() => pickLyrics(r)}>
+                  usar
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {selectedLrc && (
-          <div className="flex flex-col gap-3 rounded border border-black/10 p-3 dark:border-white/10">
-            <div className="flex items-center gap-3">
-              <label className="text-sm text-zinc-500">Offset (ms)</label>
+          <div className="flex flex-col gap-3 rounded-xl bg-background p-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm text-muted">Offset (ms)</label>
               <input
                 type="number"
-                className="w-24 rounded border border-black/20 px-2 py-1 dark:border-white/20"
+                className="w-24 rounded-lg border border-border bg-surface px-2 py-1"
                 value={offsetMs}
                 onChange={(e) => setOffsetMs(Number(e.target.value))}
               />
-              <button
-                className="rounded border border-black/20 px-3 py-1 text-xs dark:border-white/20"
+              <Button
+                variant="secondary"
+                className="text-xs"
                 onClick={tapToSync}
                 disabled={!data.stems.instrumental}
               >
-                Tap to sync (toque no play e clique aqui na 1ª palavra)
-              </button>
+                Tap to sync (toque o play e clique aqui na 1ª palavra)
+              </Button>
             </div>
 
             <div className="max-h-40 overflow-y-auto text-sm">
               {previewLines.map((line, i) => (
-                <p key={i} className={i === previewLineIdx ? "font-semibold text-foreground" : "text-zinc-500"}>
+                <p key={i} className={i === previewLineIdx ? "font-semibold text-foreground" : "text-muted"}>
                   {line.text || "…"}
                 </p>
               ))}
             </div>
 
-            <button
-              className="self-start rounded bg-foreground px-4 py-2 text-sm text-background disabled:opacity-40"
-              onClick={saveLyrics}
-              disabled={lyricsSaving}
-            >
-              {lyricsSaving ? "Salvando…" : "Salvar letra"}
-            </button>
+            <Button loading={lyricsSaving} onClick={saveLyrics} className="self-start">
+              Salvar letra
+            </Button>
           </div>
         )}
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">Arte de fundo (iTunes)</h2>
+      <section className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5">
+        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted">
+          <ImageIcon className="h-4 w-4" /> Arte de fundo
+        </h2>
         <div className="flex gap-2">
           <input
-            className="flex-1 rounded border border-black/20 px-3 py-2 dark:border-white/20"
+            className="flex-1 rounded-xl border border-border bg-background px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent"
             value={artQuery}
             onChange={(e) => setArtQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && searchArt()}
           />
-          <button className="rounded bg-foreground px-4 py-2 text-sm text-background" onClick={searchArt}>
-            Buscar
-          </button>
+          <Button variant="secondary" loading={artSearching} onClick={searchArt}>
+            Buscar no iTunes
+          </Button>
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          {artResults.map((r, i) => (
-            // eslint-disable-next-line @next/next/no-img-element -- external, unsized artwork thumbnails
-            <img
-              key={i}
-              src={r.artworkUrl}
-              alt={r.trackName}
-              className={`aspect-square cursor-pointer rounded object-cover ${artUrl === r.artworkUrl ? "ring-2 ring-foreground" : ""}`}
-              onClick={() => setArtUrl(r.artworkUrl)}
-            />
-          ))}
+        <div className="grid grid-cols-3 gap-3">
+          {artChoices.map((r, i) => {
+            const selected = artUrl === r.artworkUrl;
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setArtUrl(r.artworkUrl)}
+                className={`group relative aspect-square overflow-hidden rounded-xl transition-all ${
+                  selected ? "ring-3 ring-accent" : "ring-1 ring-border hover:ring-2 hover:ring-accent/50"
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- external, unsized artwork thumbnails */}
+                <img src={r.artworkUrl} alt={r.trackName} className="h-full w-full object-cover" />
+                {i === 0 && data.song.thumbnail_url === r.artworkUrl && (
+                  <span className="absolute left-1 top-1 flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[9px] text-white">
+                    <Video className="h-2.5 w-2.5" /> YouTube
+                  </span>
+                )}
+                {selected && (
+                  <span className="absolute bottom-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white">
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
+        <p className="text-xs text-muted">
+          {artUrl ? "Fundo selecionado — ajuste abaixo e clique em salvar." : "Nenhum fundo selecionado ainda: clique numa imagem acima."}
+        </p>
 
         {artUrl && (
-          <div className="relative h-40 w-full overflow-hidden rounded">
+          <div className="relative h-40 w-full overflow-hidden rounded-xl">
             {/* eslint-disable-next-line @next/next/no-img-element -- external, unsized artwork preview */}
             <img
               src={artUrl}
@@ -296,33 +330,33 @@ export default function SongEditorPage() {
               style={{ filter: `blur(${blur}px) contrast(${contrast}%)` }}
             />
             <div className="absolute inset-0 bg-black" style={{ opacity: opacity / 100 }} />
-            <p className="absolute inset-0 flex items-center justify-center text-lg font-semibold text-white">
-              Prévia da letra
-            </p>
+            <p className="absolute inset-0 flex items-center justify-center text-lg font-semibold text-white">Prévia da letra</p>
           </div>
         )}
 
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3 pt-1">
           <label className="flex items-center gap-4 text-sm">
-            <span className="w-32 text-zinc-500">Blur</span>
-            <input type="range" min={0} max={20} value={blur} onChange={(e) => setBlur(Number(e.target.value))} className="flex-1" />
+            <span className="w-24 text-muted">Blur</span>
+            <input type="range" min={0} max={30} value={blur} onChange={(e) => setBlur(Number(e.target.value))} className="flex-1 accent-accent" />
           </label>
           <label className="flex items-center gap-4 text-sm">
-            <span className="w-32 text-zinc-500">Escurecer</span>
-            <input type="range" min={0} max={100} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} className="flex-1" />
+            <span className="w-24 text-muted">Escurecer</span>
+            <input type="range" min={0} max={100} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} className="flex-1 accent-accent" />
           </label>
           <label className="flex items-center gap-4 text-sm">
-            <span className="w-32 text-zinc-500">Contraste</span>
-            <input type="range" min={50} max={150} value={contrast} onChange={(e) => setContrast(Number(e.target.value))} className="flex-1" />
+            <span className="w-24 text-muted">Contraste</span>
+            <input type="range" min={50} max={150} value={contrast} onChange={(e) => setContrast(Number(e.target.value))} className="flex-1 accent-accent" />
           </label>
         </div>
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">Mixagem padrão</h2>
+      <section className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-5">
+        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted">
+          <SlidersHorizontal className="h-4 w-4" /> Mixagem padrão
+        </h2>
         {(["instrumental", "lead_vocal", "backing_vocal"] as const).map((type) => (
           <label key={type} className="flex items-center gap-4 text-sm">
-            <span className="w-32 text-zinc-500">
+            <span className="w-32 text-muted">
               {type === "instrumental" ? "Instrumental" : type === "lead_vocal" ? "Vocal principal" : "Backing vocal"}
             </span>
             <input
@@ -331,18 +365,15 @@ export default function SongEditorPage() {
               max={100}
               value={mixVols[type]}
               onChange={(e) => setMixVols((prev) => ({ ...prev, [type]: Number(e.target.value) }))}
-              className="flex-1"
+              className="flex-1 accent-accent"
             />
+            <span className="w-9 text-right text-xs tabular-nums text-muted">{mixVols[type]}%</span>
           </label>
         ))}
 
-        <button
-          className="self-start rounded bg-foreground px-4 py-2 text-sm text-background disabled:opacity-40"
-          onClick={saveDisplaySettings}
-          disabled={displaySaving}
-        >
-          {displaySaving ? "Salvando…" : "Salvar exibição"}
-        </button>
+        <Button loading={displaySaving} onClick={saveDisplaySettings} className="self-start">
+          Salvar exibição
+        </Button>
       </section>
     </main>
   );
