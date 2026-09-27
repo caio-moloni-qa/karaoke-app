@@ -59,6 +59,15 @@ export default function RoomRemotePage() {
   const [pendingSongIds, setPendingSongIds] = useState<Set<string>>(new Set());
   const [pendingQueueItemIds, setPendingQueueItemIds] = useState<Set<string>>(new Set());
 
+  const [libraryFilter, setLibraryFilter] = useState("");
+  const filteredLibrary = useMemo(() => {
+    const q = libraryFilter.trim().toLowerCase();
+    if (!q) return library;
+    return library.filter(
+      (song) => song.title.toLowerCase().includes(q) || song.artist_guess?.toLowerCase().includes(q)
+    );
+  }, [library, libraryFilter]);
+
   const loadQueue = useCallback(async () => {
     const { data } = await supabase
       .from("queue_items")
@@ -433,8 +442,22 @@ export default function RoomRemotePage() {
           <Sparkles className="h-4 w-4" /> Já prontas
         </h2>
         {library.length === 0 && <p className="text-sm text-muted">Nenhuma música processada ainda.</p>}
+        {library.length > 0 && (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              className="w-full rounded-xl border border-border bg-surface py-2.5 pl-9 pr-4 text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent"
+              placeholder="Filtrar por título ou artista"
+              value={libraryFilter}
+              onChange={(e) => setLibraryFilter(e.target.value)}
+            />
+          </div>
+        )}
+        {library.length > 0 && filteredLibrary.length === 0 && (
+          <p className="text-sm text-muted">Nenhuma música encontrada para &quot;{libraryFilter}&quot;.</p>
+        )}
         <ul className="flex flex-col gap-2">
-          {library.map((song) => (
+          {filteredLibrary.map((song) => (
             <li key={song.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-surface px-4 py-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
