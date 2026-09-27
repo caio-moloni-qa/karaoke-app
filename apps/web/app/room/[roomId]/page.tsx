@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ListMusic, Pencil, Plus, Search, Sparkles, Volume2, X } from "lucide-react";
+import Link from "next/link";
+import { ListMusic, Monitor, Pencil, Plus, Search, Sparkles, Volume2, X } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useYoutubePreview } from "@/lib/useYoutubePreview";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
@@ -239,9 +240,17 @@ export default function RoomRemotePage() {
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 px-5 py-8">
       <div id={playerElementId} className="pointer-events-none absolute h-0 w-0 overflow-hidden" />
 
-      <header>
-        <p className="text-sm text-muted">Sala</p>
-        <h1 className="text-lg font-semibold">Olá, {guest.displayName}</h1>
+      <header className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-muted">Sala</p>
+          <h1 className="text-lg font-semibold">Olá, {guest.displayName}</h1>
+        </div>
+        <Link
+          href={`/stage/${roomId}`}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm transition-colors hover:bg-surface-hover"
+        >
+          <Monitor className="h-4 w-4" /> Ir para o palco
+        </Link>
       </header>
 
       <section className="flex flex-col gap-3">
