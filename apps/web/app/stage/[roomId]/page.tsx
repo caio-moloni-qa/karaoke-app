@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
-import { Maximize, Minimize, Music2, Pause, Play, Trash2, Wifi, WifiOff } from "lucide-react";
+import { Maximize, Minimize, Music2, Pause, Play, SkipForward, Trash2, Wifi, WifiOff } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
 import { useWorkerOnline } from "@/lib/useWorkerOnline";
@@ -60,6 +60,7 @@ export default function StagePage() {
   const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [startingNext, setStartingNext] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [clearingQueue, setClearingQueue] = useState(false);
   const workerOnline = useWorkerOnline();
 
@@ -244,6 +245,15 @@ export default function StagePage() {
     currentSongIdRef.current = null;
   }
 
+  async function skipSong() {
+    setSkipping(true);
+    try {
+      await markPlayedAndAdvance();
+    } finally {
+      setSkipping(false);
+    }
+  }
+
   async function startNext() {
     const next = upNext[0];
     if (!next) return;
@@ -384,14 +394,24 @@ export default function StagePage() {
 
           <LyricsView lines={lyricsLines} currentIndex={currentLyricIdx} />
 
-          <button
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-accent to-accent-2 text-accent-foreground shadow-lg shadow-accent/30 transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={isPlaying ? pause : play}
-            disabled={!stemUrls.instrumental}
-            aria-label={isPlaying ? "Pausar" : "Tocar"}
-          >
-            {isPlaying ? <Pause className="h-7 w-7" /> : <Play className="ml-0.5 h-7 w-7" />}
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-accent to-accent-2 text-accent-foreground shadow-lg shadow-accent/30 transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={isPlaying ? pause : play}
+              disabled={!stemUrls.instrumental}
+              aria-label={isPlaying ? "Pausar" : "Tocar"}
+            >
+              {isPlaying ? <Pause className="h-7 w-7" /> : <Play className="ml-0.5 h-7 w-7" />}
+            </button>
+            {upNext.length > 0 && (
+              <IconButton
+                icon={<SkipForward className="h-5 w-5" />}
+                aria-label="Pular para a próxima música"
+                loading={skipping}
+                onClick={skipSong}
+              />
+            )}
+          </div>
 
           {upNext.length > 0 && (
             <p className="text-sm text-muted">Próxima: {upNext[0].songs?.title}</p>
