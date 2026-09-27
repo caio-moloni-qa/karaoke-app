@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
-import { Maximize, Minimize, Music2, Pause, Play, SkipForward, Trash2, Wifi, WifiOff } from "lucide-react";
+import { Loader2, Maximize, Minimize, Music2, Pause, Play, SkipForward, Smartphone, Trash2, Wifi, WifiOff } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
 import { useWorkerOnline } from "@/lib/useWorkerOnline";
@@ -62,6 +63,8 @@ export default function StagePage() {
   const [startingNext, setStartingNext] = useState(false);
   const [skipping, setSkipping] = useState(false);
   const [clearingQueue, setClearingQueue] = useState(false);
+  const [loadingSong, setLoadingSong] = useState(false);
+  const [togglingPlay, setTogglingPlay] = useState(false);
   const workerOnline = useWorkerOnline();
 
   const audioRefs = useRef<Partial<Record<StemType, HTMLAudioElement>>>({});
@@ -133,6 +136,7 @@ export default function StagePage() {
     setLyricsLines([]);
     setCurrentLyricIdx(-1);
     setBackground(null);
+    setLoadingSong(true);
 
     fetch(`/api/songs/${nowPlaying.song_id}`)
       .then((res) => res.json())
@@ -173,7 +177,8 @@ export default function StagePage() {
             if (gain) gain.gain.value = defaultVolumes[type] / 100;
           }
         }
-      });
+      })
+      .finally(() => setLoadingSong(false));
   }, [nowPlaying]);
 
   function onInstrumentalTimeUpdate() {
@@ -219,12 +224,17 @@ export default function StagePage() {
   }
 
   async function play() {
-    const mixer = ensureMixer();
-    await mixer.context.resume();
-    for (const { type } of TRACKS) {
-      audioRefs.current[type]?.play();
+    setTogglingPlay(true);
+    try {
+      const mixer = ensureMixer();
+      await mixer.context.resume();
+      for (const { type } of TRACKS) {
+        audioRefs.current[type]?.play();
+      }
+      setIsPlaying(true);
+    } finally {
+      setTogglingPlay(false);
     }
-    setIsPlaying(true);
   }
 
   function pause() {
@@ -242,6 +252,7 @@ export default function StagePage() {
     setStemUrls({});
     setBackground(null);
     setLyricsLines([]);
+    setLoadingSong(false);
     currentSongIdRef.current = null;
   }
 
@@ -273,6 +284,7 @@ export default function StagePage() {
       setStemUrls({});
       setBackground(null);
       setLyricsLines([]);
+      setLoadingSong(false);
       currentSongIdRef.current = null;
       await supabase
         .from("queue_items")
@@ -317,6 +329,14 @@ export default function StagePage() {
           {workerOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
           Worker {workerOnline ? "online" : "offline"}
         </span>
+        <Link
+          href={`/room/${roomId}`}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface text-foreground transition-colors hover:bg-surface-hover"
+          aria-label="Ir para o controle"
+          title="Ir para o controle"
+        >
+          <Smartphone className="h-4 w-4" />
+        </Link>
         <IconButton
           icon={isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
           aria-label={isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
@@ -394,14 +414,26 @@ export default function StagePage() {
 
           <LyricsView lines={lyricsLines} currentIndex={currentLyricIdx} />
 
+          {loadingSong && (
+            <p className="flex items-center gap-2 text-sm text-muted">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando música…
+            </p>
+          )}
+
           <div className="flex items-center gap-4">
             <button
               className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-accent to-accent-2 text-accent-foreground shadow-lg shadow-accent/30 transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
               onClick={isPlaying ? pause : play}
-              disabled={!stemUrls.instrumental}
+              disabled={!stemUrls.instrumental || togglingPlay}
               aria-label={isPlaying ? "Pausar" : "Tocar"}
             >
-              {isPlaying ? <Pause className="h-7 w-7" /> : <Play className="ml-0.5 h-7 w-7" />}
+              {togglingPlay ? (
+                <Loader2 className="h-7 w-7 animate-spin" />
+              ) : isPlaying ? (
+                <Pause className="h-7 w-7" />
+              ) : (
+                <Play className="ml-0.5 h-7 w-7" />
+              )}
             </button>
             {upNext.length > 0 && (
               <IconButton
