@@ -48,6 +48,15 @@ body {
   display: none;
 }
 
+/* The YouTube IFrame API replaces its target div with an iframe carrying
+   fixed width/height attributes from creation time — this makes it fill
+   whatever size the wrapper is resized to instead (e.g. to exactly match
+   the thumbnail being previewed). */
+.youtube-preview-wrapper > iframe {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

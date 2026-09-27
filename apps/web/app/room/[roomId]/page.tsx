@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ListMusic, Mic2, Monitor, Music2, Pencil, Plus, Search, Sparkles, Volume2, X } from "lucide-react";
@@ -36,6 +36,19 @@ export default function RoomRemotePage() {
   const router = useRouter();
   const supabase = useMemo(() => createBrowserClient(), []);
   const { preview, playerElementId, previewingVideoId } = useYoutubePreview();
+  const thumbRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const [overlayRect, setOverlayRect] = useState<{ top: number; left: number; width: number; height: number } | null>(
+    null
+  );
+
+  function handlePreview(result: YoutubeSearchResult) {
+    const thumbEl = thumbRefs.current.get(result.videoId);
+    if (thumbEl) {
+      const rect = thumbEl.getBoundingClientRect();
+      setOverlayRect({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
+    }
+    preview(result.videoId, result.durationSeconds);
+  }
 
   // Starts null on both server and the client's first render so hydration
   // matches; the real value (if any) is only known after mount, since
@@ -300,11 +313,26 @@ export default function RoomRemotePage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 px-5 py-8">
-      {/* Small but genuinely visible (not 0x0) — mobile browsers are much
-          more aggressive about blocking autoplay-with-sound on
-          invisible/zero-size iframes, even from a direct tap. */}
-      <div className="fixed bottom-4 right-4 z-20 overflow-hidden rounded-xl border border-border bg-surface shadow-lg">
-        <div id={playerElementId} />
+      {/* Overlays exactly on top of whichever thumbnail is being previewed
+          (real dimensions, not 0x0 — mobile browsers are much more
+          aggressive about blocking autoplay-with-sound on hidden/zero-size
+          iframes, even from a direct tap). Parked off-screen with real
+          160x90 dimensions until the first preview so it's never actually
+          0-sized even before overlayRect is known. Hidden via opacity
+          between previews rather than unmounted, since the underlying
+          YT.Player is tied to this exact element for its whole lifetime. */}
+      <div
+        className="youtube-preview-wrapper fixed z-20 overflow-hidden rounded-xl border border-border bg-surface shadow-lg transition-opacity"
+        style={
+          overlayRect
+            ? { top: overlayRect.top, left: overlayRect.left, width: overlayRect.width, height: overlayRect.height }
+            : { bottom: 16, right: 16, width: 160, height: 90 }
+        }
+      >
+        <div
+          id={playerElementId}
+          className={previewingVideoId ? "opacity-100" : "pointer-events-none opacity-0"}
+        />
       </div>
 
       <header className="flex items-center justify-between gap-3">
@@ -433,7 +461,14 @@ export default function RoomRemotePage() {
                 <li key={result.videoId} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
                   {result.thumbnailUrl && (
                     // eslint-disable-next-line @next/next/no-img-element -- thumbnails are external, unsized YouTube URLs
-                    <img src={result.thumbnailUrl} alt="" className="h-12 w-16 shrink-0 rounded-lg object-cover" />
+                    <img
+                      ref={(el) => {
+                        if (el) thumbRefs.current.set(result.videoId, el);
+                      }}
+                      src={result.thumbnailUrl}
+                      alt=""
+                      className="h-12 w-16 shrink-0 rounded-lg object-cover"
+                    />
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{result.title}</p>
@@ -443,7 +478,7 @@ export default function RoomRemotePage() {
                     variant={previewingVideoId === result.videoId ? "primary" : "ghost"}
                     icon={<Volume2 className={previewingVideoId === result.videoId ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />}
                     aria-label="Ouvir prévia de 5s"
-                    onClick={() => preview(result.videoId, result.durationSeconds)}
+                    onClick={() => handlePreview(result)}
                   />
                   <IconButton
                     icon={<Plus className="h-4 w-4" />}
