@@ -3,11 +3,11 @@
 --
 -- To use it:
 --   1. In Supabase Studio -> Storage, open the "stems" bucket (created by
---      migration 0002) and upload three short test audio files under the
---      path demo-song/, named to match the storage_path values below:
---        demo-song/instrumental.mp3
---        demo-song/lead_vocal.mp3
---        demo-song/backing_vocal.mp3
+--      migration 0002) and upload three short test audio files at the
+--      bucket root, named to match the storage_path values below:
+--        instrumental.mp3
+--        lead_vocal.mp3
+--        backing_vocal.mp3
 --   2. Run this file (`supabase db reset`, or paste into the SQL editor).
 --   3. Visit /room/00000000-0000-0000-0000-000000000001 on a phone and
 --      /stage/00000000-0000-0000-0000-000000000001 on the big screen.
@@ -22,7 +22,7 @@ on conflict (id) do nothing;
 
 insert into stems (song_id, type, storage_path)
 values
-  ('00000000-0000-0000-0000-000000000002', 'instrumental', 'demo-song/instrumental.mp3'),
-  ('00000000-0000-0000-0000-000000000002', 'lead_vocal', 'demo-song/lead_vocal.mp3'),
-  ('00000000-0000-0000-0000-000000000002', 'backing_vocal', 'demo-song/backing_vocal.mp3')
+  ('00000000-0000-0000-0000-000000000002', 'instrumental', 'instrumental.mp3'),
+  ('00000000-0000-0000-0000-000000000002', 'lead_vocal', 'lead_vocal.mp3'),
+  ('00000000-0000-0000-0000-000000000002', 'backing_vocal', 'backing_vocal.mp3')
 on conflict (song_id, type) do nothing;

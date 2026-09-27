@@ -34,8 +34,8 @@ que faz polling na API do app em vez de expor porta nenhuma.
    `supabase/migrations/` (SQL editor do Studio, ou `supabase db push` se
    tiver a CLI linkada ao projeto).
 2. Em Storage, confirme que o bucket privado `stems` foi criado pela migration
-   `0002_storage.sql`. Faça upload manual de 3 arquivos de áudio de teste em
-   `stems/demo-song/` (`instrumental.mp3`, `lead_vocal.mp3`,
+   `0002_storage.sql`. Faça upload manual de 3 arquivos de áudio de teste na
+   raiz do bucket (`instrumental.mp3`, `lead_vocal.mp3`,
    `backing_vocal.mp3`) — qualquer trecho curto serve para testar o mixer.
 3. Rode `supabase/seed.sql` (SQL editor do Studio) para criar a sala e a
    música de demonstração.
