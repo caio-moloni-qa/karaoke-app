@@ -262,7 +262,7 @@ export default function StagePage() {
       </div>
 
       {roomUrl && (
-        <div className="absolute bottom-4 left-4 flex flex-col items-center gap-1 rounded bg-white/90 p-2 dark:bg-black/70">
+        <div className="absolute left-4 top-4 flex flex-col items-center gap-1 rounded bg-white/90 p-2 dark:bg-black/70">
           <QRCodeSVG value={roomUrl} size={96} />
           <p className="text-[10px] text-zinc-600 dark:text-zinc-300">Escaneie para entrar</p>
         </div>
