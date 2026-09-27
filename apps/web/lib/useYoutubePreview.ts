@@ -49,7 +49,10 @@ export function useYoutubePreview() {
   useEffect(() => {
     let cancelled = false;
     loadYoutubeIframeApi().then(() => {
-      if (cancelled || !window.YT) return;
+      // The target div only exists once past the guest-join screen; if the
+      // API finishes loading before that (or the request never got past
+      // this screen at all), there's nothing to attach to yet.
+      if (cancelled || !window.YT || !document.getElementById(PREVIEW_ELEMENT_ID)) return;
       playerRef.current = new window.YT.Player(PREVIEW_ELEMENT_ID, {
         height: "0",
         width: "0",
