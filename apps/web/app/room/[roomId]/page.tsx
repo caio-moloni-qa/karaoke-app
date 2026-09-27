@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useYoutubePreview } from "@/lib/useYoutubePreview";
+import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
 import { SONG_STATUS_LABEL, type QueueItemWithSong, type Song } from "@/lib/types";
 import type { YoutubeSearchResult } from "@/lib/youtube";
 
@@ -53,6 +54,13 @@ export default function RoomRemotePage() {
       .order("title", { ascending: true });
     setLibrary((data as Song[]) ?? []);
   }, [supabase]);
+
+  const refetchAll = useCallback(() => {
+    loadQueue();
+    loadLibrary();
+  }, [loadQueue, loadLibrary]);
+
+  useRealtimeFallback(refetchAll);
 
   useEffect(() => {
     const raw = localStorage.getItem(guestStorageKey(roomId));

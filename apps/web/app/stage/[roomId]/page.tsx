@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { createBrowserClient } from "@/lib/supabase/browser";
+import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
 import { SONG_STATUS_LABEL, type QueueItemWithSong, type StemType } from "@/lib/types";
 
 const TRACKS: { type: StemType; label: string }[] = [
@@ -65,6 +66,8 @@ export default function StagePage() {
       supabase.removeChannel(channel);
     };
   }, [roomId, supabase, loadQueue]);
+
+  useRealtimeFallback(loadQueue);
 
   // Fetch signed stem URLs whenever the now-playing song changes.
   useEffect(() => {
@@ -130,8 +133,29 @@ export default function StagePage() {
     await supabase.from("queue_items").update({ status: "now_playing" }).eq("id", next.id);
   }
 
+  async function clearQueue() {
+    if (!window.confirm("Limpar toda a fila da sala? Isso remove os pedidos de todo mundo.")) return;
+    pause();
+    setStemUrls({});
+    currentSongIdRef.current = null;
+    await supabase
+      .from("queue_items")
+      .update({ status: "removed" })
+      .eq("room_id", roomId)
+      .in("status", ["queued", "now_playing"]);
+  }
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-10 px-8 py-12">
+    <main className="relative flex min-h-screen flex-col items-center justify-center gap-10 px-8 py-12">
+      {queue.length > 0 && (
+        <button
+          className="absolute right-4 top-4 rounded border border-black/20 px-3 py-1 text-xs text-zinc-500 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+          onClick={clearQueue}
+        >
+          Limpar fila
+        </button>
+      )}
+
       {TRACKS.map(({ type }) => (
         <audio
           key={type}
