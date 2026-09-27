@@ -11,6 +11,7 @@ import { latestProcessingJob, SONG_STATUS_LABEL, type QueueItemWithSong, type So
 import type { YoutubeSearchResult } from "@/lib/youtube";
 import { ProgressBar } from "@/components/ProgressBar";
 import { Button, IconButton } from "@/components/Button";
+import { generateUUID } from "@/lib/uuid";
 
 interface GuestSession {
   guestId: string;
@@ -143,7 +144,7 @@ export default function RoomRemotePage() {
     if (!name) return;
     setJoining(true);
     try {
-      const clientToken = crypto.randomUUID();
+      const clientToken = generateUUID();
       const { data, error } = await supabase
         .from("guests")
         .insert({ room_id: roomId, display_name: name, client_token: clientToken })
