@@ -14,7 +14,11 @@ declare global {
     YT?: {
       Player: new (
         elementId: string,
-        options: { height: string; width: string; events?: { onReady?: () => void } }
+        options: {
+          height: string;
+          width: string;
+          events?: { onReady?: () => void; onError?: (e: { data: number }) => void };
+        }
       ) => YTPlayer;
     };
     onYouTubeIframeAPIReady?: () => void;
@@ -60,7 +64,12 @@ export function useYoutubePreview() {
       playerRef.current = new window.YT.Player(PREVIEW_ELEMENT_ID, {
         height: "90",
         width: "160",
-        events: { onReady: () => (readyRef.current = true) },
+        events: {
+          onReady: () => (readyRef.current = true),
+          // Error codes: 2 invalid param, 5 HTML5 player error, 100 not
+          // found/private, 101/150 embedding disallowed by the video owner.
+          onError: (e) => console.warn("[yt-preview] error code=" + e.data),
+        },
       });
     });
     return () => {
