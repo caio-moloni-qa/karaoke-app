@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ListMusic, Monitor, Pencil, Plus, Search, Sparkles, Volume2, X } from "lucide-react";
+import { ListMusic, Mic2, Monitor, Pencil, Plus, Search, Sparkles, Volume2, X } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useYoutubePreview } from "@/lib/useYoutubePreview";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
@@ -16,6 +16,14 @@ interface GuestSession {
   guestId: string;
   clientToken: string;
   displayName: string;
+}
+
+interface LibrarySong extends Song {
+  lyrics: { song_id: string }[] | { song_id: string } | null;
+}
+
+function hasLyrics(song: LibrarySong): boolean {
+  return Array.isArray(song.lyrics) ? song.lyrics.length > 0 : !!song.lyrics;
 }
 
 function guestStorageKey(roomId: string) {
@@ -35,7 +43,7 @@ export default function RoomRemotePage() {
   const [hydrated, setHydrated] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [joining, setJoining] = useState(false);
-  const [library, setLibrary] = useState<Song[]>([]);
+  const [library, setLibrary] = useState<LibrarySong[]>([]);
   const [queue, setQueue] = useState<QueueItemWithSong[]>([]);
 
   const [autoMode, setAutoMode] = useState(true);
@@ -66,10 +74,10 @@ export default function RoomRemotePage() {
   const loadLibrary = useCallback(async () => {
     const { data } = await supabase
       .from("songs")
-      .select("*")
+      .select("*, lyrics(song_id)")
       .eq("status", "ready")
       .order("title", { ascending: true });
-    setLibrary((data as Song[]) ?? []);
+    setLibrary((data as LibrarySong[]) ?? []);
   }, [supabase]);
 
   const refetchAll = useCallback(() => {
@@ -429,7 +437,14 @@ export default function RoomRemotePage() {
           {library.map((song) => (
             <li key={song.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-surface px-4 py-3">
               <div className="min-w-0">
-                <p className="truncate font-medium">{song.title}</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate font-medium">{song.title}</p>
+                  {hasLyrics(song) && (
+                    <span title="Letra disponível">
+                      <Mic2 className="h-3.5 w-3.5 shrink-0 text-accent" />
+                    </span>
+                  )}
+                </div>
                 {song.artist_guess && <p className="truncate text-xs text-muted">{song.artist_guess}</p>}
               </div>
               <div className="flex shrink-0 gap-2">
