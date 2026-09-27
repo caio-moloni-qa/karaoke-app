@@ -9,6 +9,7 @@ import { useWorkerOnline } from "@/lib/useWorkerOnline";
 import { currentLineIndex, parseLrc, type LrcLine } from "@/lib/lrc";
 import { latestProcessingJob, SONG_STATUS_LABEL, type QueueItemWithSong, type StemType } from "@/lib/types";
 import { ProgressBar } from "@/components/ProgressBar";
+import { LyricsView } from "@/components/LyricsView";
 
 interface ArtSettings {
   url: string;
@@ -326,11 +327,7 @@ export default function StagePage() {
             )}
           </div>
 
-          {lyricsLines.length > 0 && (
-            <p className="min-h-8 text-center text-xl font-medium">
-              {currentLyricIdx >= 0 ? lyricsLines[currentLyricIdx].text : ""}
-            </p>
-          )}
+          <LyricsView lines={lyricsLines} currentIndex={currentLyricIdx} />
 
           <button
             className="rounded-full bg-foreground px-8 py-3 text-lg text-background"
