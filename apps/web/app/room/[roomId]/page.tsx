@@ -22,11 +22,11 @@ export default function RoomRemotePage() {
   const supabase = useMemo(() => createBrowserClient(), []);
   const { preview, playerElementId } = useYoutubePreview();
 
-  const [guest, setGuest] = useState<GuestSession | null>(() => {
-    if (typeof window === "undefined") return null;
-    const raw = localStorage.getItem(guestStorageKey(roomId));
-    return raw ? (JSON.parse(raw) as GuestSession) : null;
-  });
+  // Starts null on both server and the client's first render so hydration
+  // matches; the real value (if any) is only known after mount, since
+  // localStorage isn't available during SSR.
+  const [guest, setGuest] = useState<GuestSession | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [library, setLibrary] = useState<Song[]>([]);
   const [queue, setQueue] = useState<QueueItemWithSong[]>([]);
@@ -53,6 +53,13 @@ export default function RoomRemotePage() {
       .order("title", { ascending: true });
     setLibrary((data as Song[]) ?? []);
   }, [supabase]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(guestStorageKey(roomId));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- must run post-mount, localStorage isn't available during SSR
+    if (raw) setGuest(JSON.parse(raw) as GuestSession);
+    setHydrated(true);
+  }, [roomId]);
 
   useEffect(() => {
     // Initial load + realtime subscription is the sanctioned pattern for
@@ -144,6 +151,10 @@ export default function RoomRemotePage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientToken: guest.clientToken }),
     });
+  }
+
+  if (!hydrated) {
+    return <main className="min-h-screen" />;
   }
 
   if (!guest) {
