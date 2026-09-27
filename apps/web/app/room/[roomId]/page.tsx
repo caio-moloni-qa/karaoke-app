@@ -5,8 +5,9 @@ import { useParams } from "next/navigation";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useYoutubePreview } from "@/lib/useYoutubePreview";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
-import { SONG_STATUS_LABEL, type QueueItemWithSong, type Song } from "@/lib/types";
+import { latestProcessingJob, SONG_STATUS_LABEL, type QueueItemWithSong, type Song } from "@/lib/types";
 import type { YoutubeSearchResult } from "@/lib/youtube";
+import { ProgressBar } from "@/components/ProgressBar";
 
 interface GuestSession {
   guestId: string;
@@ -39,7 +40,9 @@ export default function RoomRemotePage() {
   const loadQueue = useCallback(async () => {
     const { data } = await supabase
       .from("queue_items")
-      .select("*, songs(id, title, artist_guess, status), guests(id, display_name)")
+      .select(
+        "*, songs(id, title, artist_guess, status, processing_jobs(status, stage_label, progress_pct, created_at)), guests(id, display_name)"
+      )
       .eq("room_id", roomId)
       .in("status", ["queued", "now_playing"])
       .order("added_at", { ascending: true });
@@ -87,6 +90,7 @@ export default function RoomRemotePage() {
         loadQueue();
         loadLibrary();
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "processing_jobs" }, () => loadQueue())
       .subscribe();
 
     return () => {
@@ -200,33 +204,40 @@ export default function RoomRemotePage() {
         <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">Fila</h2>
         {queue.length === 0 && <p className="text-sm text-zinc-500">Fila vazia.</p>}
         <ul className="flex flex-col gap-2">
-          {queue.map((item) => (
-            <li
-              key={item.id}
-              className="flex items-center justify-between rounded border border-black/10 px-3 py-2 dark:border-white/10"
-            >
-              <div>
-                <p className="font-medium">{item.songs?.title}</p>
-                <p className="text-xs text-zinc-500">
-                  {item.status === "now_playing"
-                    ? "Tocando agora"
-                    : item.songs && item.songs.status !== "ready"
-                      ? SONG_STATUS_LABEL[item.songs.status]
-                      : "Na fila"}
-                  {" · pedido por "}
-                  {item.guests?.display_name ?? "?"}
-                </p>
-              </div>
-              {item.requested_by === guest.guestId && item.status === "queued" && (
-                <button
-                  className="text-xs text-red-600 hover:underline"
-                  onClick={() => removeFromQueue(item.id)}
-                >
-                  remover
-                </button>
-              )}
-            </li>
-          ))}
+          {queue.map((item) => {
+            const job = latestProcessingJob(item.songs?.processing_jobs);
+            const isProcessing = item.songs && item.songs.status !== "ready" && item.songs.status !== "failed";
+            return (
+              <li
+                key={item.id}
+                className="flex flex-col gap-2 rounded border border-black/10 px-3 py-2 dark:border-white/10"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">{item.songs?.title}</p>
+                    <p className="text-xs text-zinc-500">
+                      {item.status === "now_playing"
+                        ? "Tocando agora"
+                        : item.songs && item.songs.status !== "ready"
+                          ? (job?.stage_label ?? SONG_STATUS_LABEL[item.songs.status])
+                          : "Na fila"}
+                      {" · pedido por "}
+                      {item.guests?.display_name ?? "?"}
+                    </p>
+                  </div>
+                  {item.requested_by === guest.guestId && item.status === "queued" && (
+                    <button
+                      className="text-xs text-red-600 hover:underline"
+                      onClick={() => removeFromQueue(item.id)}
+                    >
+                      remover
+                    </button>
+                  )}
+                </div>
+                {isProcessing && job && <ProgressBar percent={job.progress_pct} />}
+              </li>
+            );
+          })}
         </ul>
       </section>
 

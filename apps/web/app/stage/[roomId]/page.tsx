@@ -7,7 +7,8 @@ import { createBrowserClient } from "@/lib/supabase/browser";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
 import { useWorkerOnline } from "@/lib/useWorkerOnline";
 import { currentLineIndex, parseLrc, type LrcLine } from "@/lib/lrc";
-import { SONG_STATUS_LABEL, type QueueItemWithSong, type StemType } from "@/lib/types";
+import { latestProcessingJob, SONG_STATUS_LABEL, type QueueItemWithSong, type StemType } from "@/lib/types";
+import { ProgressBar } from "@/components/ProgressBar";
 
 interface ArtSettings {
   url: string;
@@ -58,7 +59,9 @@ export default function StagePage() {
   const loadQueue = useCallback(async () => {
     const { data } = await supabase
       .from("queue_items")
-      .select("*, songs(id, title, artist_guess, status), guests(id, display_name)")
+      .select(
+        "*, songs(id, title, artist_guess, status, processing_jobs(status, stage_label, progress_pct, created_at)), guests(id, display_name)"
+      )
       .eq("room_id", roomId)
       .in("status", ["queued", "now_playing"])
       .order("added_at", { ascending: true });
@@ -78,6 +81,7 @@ export default function StagePage() {
         () => loadQueue()
       )
       .on("postgres_changes", { event: "*", schema: "public", table: "songs" }, () => loadQueue())
+      .on("postgres_changes", { event: "*", schema: "public", table: "processing_jobs" }, () => loadQueue())
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -296,12 +300,18 @@ export default function StagePage() {
             </button>
           )}
           {upNext.length > 0 && upNext[0].songs && upNext[0].songs.status !== "ready" && (
-            <p className="text-zinc-500">
-              Próxima música ({upNext[0].songs.title}):{" "}
-              {upNext[0].songs.status === "failed"
-                ? SONG_STATUS_LABEL.failed
-                : SONG_STATUS_LABEL[upNext[0].songs.status]}
-            </p>
+            <div className="flex w-full max-w-sm flex-col items-center gap-2">
+              <p className="text-zinc-500">
+                Próxima música ({upNext[0].songs.title}):{" "}
+                {upNext[0].songs.status === "failed"
+                  ? SONG_STATUS_LABEL.failed
+                  : (latestProcessingJob(upNext[0].songs.processing_jobs)?.stage_label ??
+                    SONG_STATUS_LABEL[upNext[0].songs.status])}
+              </p>
+              {upNext[0].songs.status !== "failed" && (
+                <ProgressBar percent={latestProcessingJob(upNext[0].songs.processing_jobs)?.progress_pct ?? 0} />
+              )}
+            </div>
           )}
         </div>
       )}

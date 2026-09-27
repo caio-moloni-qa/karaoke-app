@@ -69,11 +69,6 @@ export interface QueueItem {
   added_at: string;
 }
 
-export interface QueueItemWithSong extends QueueItem {
-  songs: Pick<Song, "id" | "title" | "artist_guess" | "status"> | null;
-  guests: Pick<Guest, "id" | "display_name"> | null;
-}
-
 export interface ProcessingJob {
   id: string;
   song_id: string;
@@ -86,6 +81,25 @@ export interface ProcessingJob {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type SongProcessingSummary = Pick<ProcessingJob, "status" | "stage_label" | "progress_pct" | "created_at">;
+
+export interface QueueItemWithSong extends QueueItem {
+  songs:
+    | (Pick<Song, "id" | "title" | "artist_guess" | "status"> & {
+        processing_jobs: SongProcessingSummary[];
+      })
+    | null;
+  guests: Pick<Guest, "id" | "display_name"> | null;
+}
+
+// A song can have more than one processing_jobs row over time (retries
+// after a failure), but only ever one active at once — pick the most
+// recently created.
+export function latestProcessingJob(jobs: SongProcessingSummary[] | undefined): SongProcessingSummary | null {
+  if (!jobs || jobs.length === 0) return null;
+  return jobs.reduce((latest, job) => (job.created_at > latest.created_at ? job : latest));
 }
 
 export interface Lyrics {
