@@ -48,6 +48,17 @@ const PREVIEW_DURATION_MS = 5000;
 // visible player rather than a 0x0 hidden one: mobile browsers are far more
 // aggressive about blocking autoplay-with-sound on invisible/zero-size
 // iframes (a common ad-fraud pattern), even from a direct tap.
+//
+// Known limitation: doesn't work on mobile when the app is accessed via the
+// dev server's LAN IP (e.g. a guest's phone). YouTube's embedded IFrame
+// player shows "video unavailable" in that case — confirmed via onError and
+// a side-by-side test (same video plays fine on desktop via localhost) that
+// this is YouTube's own embed origin validation rejecting a bare-IP origin,
+// not a bug in this code. A free wildcard-DNS hostname (sslip.io) that
+// resolves straight to the LAN IP works around it when reachable, but some
+// networks/DNS providers block that class of service outright, so it's not
+// a reliable fix — searching and adding songs work fine regardless, this
+// only affects the "ouvir 5s" preview itself.
 export function useYoutubePreview() {
   const playerRef = useRef<YTPlayer | null>(null);
   const readyRef = useRef(false);

@@ -441,6 +441,8 @@ export default function RoomRemotePage() {
                     <p className="truncate text-sm font-medium">{result.title}</p>
                     <p className="truncate text-xs text-muted">{result.channelTitle}</p>
                   </div>
+                  {/* Doesn't work on mobile accessed via the LAN IP — see
+                      the "Known limitation" note in useYoutubePreview.ts. */}
                   <IconButton
                     variant={previewingVideoId === result.videoId ? "primary" : "ghost"}
                     icon={<Volume2 className={previewingVideoId === result.videoId ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />}
