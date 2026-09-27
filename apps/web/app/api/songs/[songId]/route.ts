@@ -39,5 +39,17 @@ export async function GET(
     stemUrls[stem.type] = signed.signedUrl;
   }
 
-  return NextResponse.json({ song, stems: stemUrls });
+  const { data: lyrics } = await supabase
+    .from("lyrics")
+    .select("raw_lrc, offset_ms")
+    .eq("song_id", songId)
+    .maybeSingle();
+
+  const { data: displaySettings } = await supabase
+    .from("song_display_settings")
+    .select("art_url, blur, opacity, contrast, mix_instrumental_vol, mix_lead_vol, mix_backing_vol")
+    .eq("song_id", songId)
+    .maybeSingle();
+
+  return NextResponse.json({ song, stems: stemUrls, lyrics, displaySettings });
 }

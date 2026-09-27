@@ -87,3 +87,25 @@ export interface ProcessingJob {
   created_at: string;
   updated_at: string;
 }
+
+export interface Lyrics {
+  id: string;
+  song_id: string;
+  source: string;
+  lrclib_id: string | null;
+  raw_lrc: string | null;
+  offset_ms: number;
+  created_at: string;
+}
+
+export interface SongDisplaySettings {
+  song_id: string;
+  art_url: string | null;
+  blur: number;
+  opacity: number;
+  contrast: number;
+  mix_instrumental_vol: number;
+  mix_lead_vol: number;
+  mix_backing_vol: number;
+  updated_at: string;
+}

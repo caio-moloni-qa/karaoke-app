@@ -294,12 +294,20 @@ export default function RoomRemotePage() {
                 <p className="font-medium">{song.title}</p>
                 {song.artist_guess && <p className="text-xs text-zinc-500">{song.artist_guess}</p>}
               </div>
-              <button
-                className="rounded bg-foreground px-3 py-1 text-xs text-background"
-                onClick={() => addToQueue(song.id)}
-              >
-                + fila
-              </button>
+              <div className="flex gap-2">
+                <a
+                  href={`/room/${roomId}/songs/${song.id}`}
+                  className="rounded border border-black/20 px-2 py-1 text-xs dark:border-white/20"
+                >
+                  editar
+                </a>
+                <button
+                  className="rounded bg-foreground px-3 py-1 text-xs text-background"
+                  onClick={() => addToQueue(song.id)}
+                >
+                  + fila
+                </button>
+              </div>
             </li>
           ))}
         </ul>

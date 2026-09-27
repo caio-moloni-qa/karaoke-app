@@ -4,7 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
+import { currentLineIndex, parseLrc, type LrcLine } from "@/lib/lrc";
 import { SONG_STATUS_LABEL, type QueueItemWithSong, type StemType } from "@/lib/types";
+
+interface ArtSettings {
+  url: string;
+  blur: number;
+  opacity: number;
+  contrast: number;
+}
 
 const TRACKS: { type: StemType; label: string }[] = [
   { type: "instrumental", label: "Instrumental" },
@@ -30,6 +38,10 @@ export default function StagePage() {
     backing_vocal: 100,
   });
   const [isPlaying, setIsPlaying] = useState(false);
+  const [lyricsLines, setLyricsLines] = useState<LrcLine[]>([]);
+  const [lyricsOffsetMs, setLyricsOffsetMs] = useState(0);
+  const [currentLyricIdx, setCurrentLyricIdx] = useState(-1);
+  const [artSettings, setArtSettings] = useState<ArtSettings | null>(null);
 
   const audioRefs = useRef<Partial<Record<StemType, HTMLAudioElement>>>({});
   const mixerRef = useRef<MixerGraph | null>(null);
@@ -69,15 +81,54 @@ export default function StagePage() {
 
   useRealtimeFallback(loadQueue);
 
-  // Fetch signed stem URLs whenever the now-playing song changes.
+  // Fetch signed stem URLs (+ lyrics, art, default mix) whenever the
+  // now-playing song changes.
   useEffect(() => {
     if (!nowPlaying || nowPlaying.song_id === currentSongIdRef.current) return;
     currentSongIdRef.current = nowPlaying.song_id;
     setIsPlaying(false);
+    setLyricsLines([]);
+    setCurrentLyricIdx(-1);
+    setArtSettings(null);
+
     fetch(`/api/songs/${nowPlaying.song_id}`)
       .then((res) => res.json())
-      .then((data) => setStemUrls(data.stems ?? {}));
+      .then((data) => {
+        setStemUrls(data.stems ?? {});
+
+        if (data.lyrics?.raw_lrc) {
+          setLyricsLines(parseLrc(data.lyrics.raw_lrc));
+          setLyricsOffsetMs(data.lyrics.offset_ms ?? 0);
+        }
+
+        if (data.displaySettings) {
+          const ds = data.displaySettings;
+          if (ds.art_url) {
+            setArtSettings({ url: ds.art_url, blur: ds.blur, opacity: ds.opacity, contrast: ds.contrast });
+          }
+          const defaultVolumes: Record<StemType, number> = {
+            original: 0,
+            instrumental: Math.round(ds.mix_instrumental_vol * 100),
+            lead_vocal: Math.round(ds.mix_lead_vol * 100),
+            backing_vocal: Math.round(ds.mix_backing_vol * 100),
+          };
+          setVolumes(defaultVolumes);
+          // The mixer's gain nodes (if already created, from a previous
+          // song reusing the same <audio> elements) hold their own value
+          // outside React state — push the new defaults into them too.
+          for (const type of Object.keys(defaultVolumes) as StemType[]) {
+            const gain = mixerRef.current?.gains[type];
+            if (gain) gain.gain.value = defaultVolumes[type] / 100;
+          }
+        }
+      });
   }, [nowPlaying]);
+
+  function onInstrumentalTimeUpdate() {
+    const el = audioRefs.current.instrumental;
+    if (!el || lyricsLines.length === 0) return;
+    setCurrentLyricIdx(currentLineIndex(lyricsLines, el.currentTime * 1000 - lyricsOffsetMs));
+  }
 
   function ensureMixer(): MixerGraph {
     if (mixerRef.current) return mixerRef.current;
@@ -99,6 +150,10 @@ export default function StagePage() {
   function setVolume(type: StemType, value: number) {
     setVolumes((prev) => ({ ...prev, [type]: value }));
     const gain = mixerRef.current?.gains[type];
+    // Web Audio's GainNode is imperative, non-React state living behind a
+    // ref by design — mutating it directly is the sanctioned escape hatch,
+    // not a render-purity violation.
+    // eslint-disable-next-line react-hooks/immutability
     if (gain) gain.gain.value = value / 100;
   }
 
@@ -147,6 +202,19 @@ export default function StagePage() {
 
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center gap-10 px-8 py-12">
+      {artSettings && (
+        <div className="absolute inset-0 -z-10 overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element -- external, unsized artwork used as a full-bleed backdrop */}
+          <img
+            src={artSettings.url}
+            alt=""
+            className="h-full w-full object-cover"
+            style={{ filter: `blur(${artSettings.blur}px) contrast(${artSettings.contrast * 100}%)` }}
+          />
+          <div className="absolute inset-0 bg-black" style={{ opacity: artSettings.opacity }} />
+        </div>
+      )}
+
       {queue.length > 0 && (
         <button
           className="absolute right-4 top-4 rounded border border-black/20 px-3 py-1 text-xs text-zinc-500 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
@@ -164,6 +232,7 @@ export default function StagePage() {
           }}
           src={stemUrls[type]}
           onEnded={type === "instrumental" ? markPlayedAndAdvance : undefined}
+          onTimeUpdate={type === "instrumental" ? onInstrumentalTimeUpdate : undefined}
           crossOrigin="anonymous"
         />
       ))}
@@ -202,6 +271,12 @@ export default function StagePage() {
               <p className="text-zinc-500">{nowPlaying.songs.artist_guess}</p>
             )}
           </div>
+
+          {lyricsLines.length > 0 && (
+            <p className="min-h-8 text-center text-xl font-medium">
+              {currentLyricIdx >= 0 ? lyricsLines[currentLyricIdx].text : ""}
+            </p>
+          )}
 
           <button
             className="rounded-full bg-foreground px-8 py-3 text-lg text-background"
