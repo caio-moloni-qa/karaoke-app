@@ -97,9 +97,18 @@ export default function RoomRemotePage() {
   useRealtimeFallback(refetchAll);
 
   useEffect(() => {
-    const raw = localStorage.getItem(guestStorageKey(roomId));
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- must run post-mount, localStorage isn't available during SSR
-    if (raw) setGuest(JSON.parse(raw) as GuestSession);
+    // localStorage can throw (private browsing, some in-app browsers like a
+    // QR-scanner's embedded webview restrict or disable it entirely) — if
+    // that happened here, the effect used to blow up before setHydrated
+    // ever ran, leaving the page permanently stuck on the blank pre-hydration
+    // screen. Guest join just degrades to "not joined yet" instead.
+    try {
+      const raw = localStorage.getItem(guestStorageKey(roomId));
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- must run post-mount, localStorage isn't available during SSR
+      if (raw) setGuest(JSON.parse(raw) as GuestSession);
+    } catch {
+      // ignore — guest just has to enter their name again
+    }
     setHydrated(true);
   }, [roomId]);
 
@@ -144,7 +153,13 @@ export default function RoomRemotePage() {
       if (error || !data) return;
 
       const session: GuestSession = { guestId: data.id, clientToken, displayName: name };
-      localStorage.setItem(guestStorageKey(roomId), JSON.stringify(session));
+      try {
+        localStorage.setItem(guestStorageKey(roomId), JSON.stringify(session));
+      } catch {
+        // Storage may be restricted (private browsing, some in-app
+        // browsers) — the session still works for this page load, it just
+        // won't survive a reload.
+      }
       setGuest(session);
     } finally {
       setJoining(false);
