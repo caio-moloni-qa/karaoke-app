@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { QRCodeSVG } from "qrcode.react";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
+import { useWorkerOnline } from "@/lib/useWorkerOnline";
 import { currentLineIndex, parseLrc, type LrcLine } from "@/lib/lrc";
 import { SONG_STATUS_LABEL, type QueueItemWithSong, type StemType } from "@/lib/types";
 
@@ -42,6 +44,9 @@ export default function StagePage() {
   const [lyricsOffsetMs, setLyricsOffsetMs] = useState(0);
   const [currentLyricIdx, setCurrentLyricIdx] = useState(-1);
   const [artSettings, setArtSettings] = useState<ArtSettings | null>(null);
+  const [roomUrl, setRoomUrl] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const workerOnline = useWorkerOnline();
 
   const audioRefs = useRef<Partial<Record<StemType, HTMLAudioElement>>>({});
   const mixerRef = useRef<MixerGraph | null>(null);
@@ -80,6 +85,25 @@ export default function StagePage() {
   }, [roomId, supabase, loadQueue]);
 
   useRealtimeFallback(loadQueue);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- window.location isn't available during SSR
+    setRoomUrl(`${window.location.origin}/room/${roomId}`);
+  }, [roomId]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  async function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen();
+    }
+  }
 
   // Fetch signed stem URLs (+ lyrics, art, default mix) whenever the
   // now-playing song changes.
@@ -215,13 +239,33 @@ export default function StagePage() {
         </div>
       )}
 
-      {queue.length > 0 && (
-        <button
-          className="absolute right-4 top-4 rounded border border-black/20 px-3 py-1 text-xs text-zinc-500 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
-          onClick={clearQueue}
+      <div className="absolute right-4 top-4 flex items-center gap-2">
+        <span
+          className={`rounded px-2 py-1 text-xs ${workerOnline ? "bg-green-600/20 text-green-600" : "bg-red-600/20 text-red-600"}`}
         >
-          Limpar fila
+          Worker {workerOnline ? "online" : "offline"}
+        </span>
+        <button
+          className="rounded border border-black/20 px-3 py-1 text-xs text-zinc-500 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+          onClick={toggleFullscreen}
+        >
+          {isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
         </button>
+        {queue.length > 0 && (
+          <button
+            className="rounded border border-black/20 px-3 py-1 text-xs text-zinc-500 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+            onClick={clearQueue}
+          >
+            Limpar fila
+          </button>
+        )}
+      </div>
+
+      {roomUrl && (
+        <div className="absolute bottom-4 left-4 flex flex-col items-center gap-1 rounded bg-white/90 p-2 dark:bg-black/70">
+          <QRCodeSVG value={roomUrl} size={96} />
+          <p className="text-[10px] text-zinc-600 dark:text-zinc-300">Escaneie para entrar</p>
+        </div>
       )}
 
       {TRACKS.map(({ type }) => (

@@ -14,6 +14,12 @@ export async function POST(request: Request) {
   const { workerId } = (await request.json().catch(() => ({}))) as { workerId?: string };
   const supabase = createServiceRoleClient();
 
+  // Doubles as the heartbeat for the online/offline indicator — the worker
+  // calls this endpoint every poll cycle regardless of job availability.
+  await supabase
+    .from("workers")
+    .upsert({ id: workerId ?? "unknown", last_seen_at: new Date().toISOString() });
+
   const { data: candidates } = await supabase
     .from("processing_jobs")
     .select("id")

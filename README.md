@@ -22,12 +22,13 @@ que faz polling na API do app em vez de expor porta nenhuma.
 
 1. **MVP1** — palco + controle remoto + fila em tempo real, com uma música
    semeada manualmente (sem busca no YouTube nem worker ainda).
-2. **MVP2** (atual) — worker real (`yt-dlp` + separação de stems em 2 estágios
+2. **MVP2** — worker real (`yt-dlp` + separação de stems em 2 estágios
    via GPU + detecção de tom/escala) e busca de música no YouTube pelo
    remote, com preview de 5s do meio da música.
-3. **MVP3** — letra sincronizada (LRCLIB) e arte de fundo (iTunes API).
-4. **MVP4** — entrada de sala via QR code, indicador de worker online/offline,
-   modo tela cheia.
+3. **MVP3** — letra sincronizada (LRCLIB) e arte de fundo (iTunes API),
+   editáveis em `/room/<roomId>/songs/<songId>`.
+4. **MVP4** (atual) — entrada de sala via QR code no palco, indicador de
+   worker online/offline, modo tela cheia.
 
 ## Setup (MVP1)
 
@@ -62,3 +63,12 @@ que faz polling na API do app em vez de expor porta nenhuma.
 4. No `/room/<roomId>`, busque uma música no YouTube, ouça o preview de 5s e
    adicione à fila — o worker vai baixar, separar os stems e marcar a música
    como pronta; o palco mostra o status até lá.
+
+## Setup (MVP4 — QR code + status do worker + tela cheia)
+
+1. Rode `supabase/migrations/0005_workers.sql` no SQL Editor do Supabase —
+   cria a tabela `workers` usada pelo indicador online/offline (o worker já
+   escreve nela a cada ciclo de polling, sem mudança nenhuma necessária no
+   `worker.py`).
+2. Nada mais a configurar: o palco (`/stage/<roomId>`) já mostra o QR code
+   pra entrar na sala, o status do worker e um botão de tela cheia.
