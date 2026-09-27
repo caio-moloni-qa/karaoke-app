@@ -60,8 +60,7 @@ export default function StagePage() {
   const [background, setBackground] = useState<Background | null>(null);
   const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [startingNext, setStartingNext] = useState(false);
-  const [skipping, setSkipping] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
   const [clearingQueue, setClearingQueue] = useState(false);
   const [loadingSong, setLoadingSong] = useState(false);
   const [togglingPlay, setTogglingPlay] = useState(false);
@@ -244,41 +243,45 @@ export default function StagePage() {
     setIsPlaying(false);
   }
 
+  // Stays true through the DB write *and* the follow-up refetch, not just
+  // the write — a plain `loading` flag around the write alone found the
+  // whole "now playing" block (button included) unmounting via the
+  // realtime update before a spinner ever got painted, since the write
+  // itself resolves in well under a frame.
   async function markPlayedAndAdvance() {
-    if (nowPlaying) {
-      await supabase.from("queue_items").update({ status: "played" }).eq("id", nowPlaying.id);
-    }
-    pause();
-    setStemUrls({});
-    setBackground(null);
-    setLyricsLines([]);
-    setLoadingSong(false);
-    currentSongIdRef.current = null;
-  }
-
-  async function skipSong() {
-    setSkipping(true);
+    setTransitioning(true);
     try {
-      await markPlayedAndAdvance();
+      if (nowPlaying) {
+        await supabase.from("queue_items").update({ status: "played" }).eq("id", nowPlaying.id);
+      }
+      pause();
+      setStemUrls({});
+      setBackground(null);
+      setLyricsLines([]);
+      setLoadingSong(false);
+      currentSongIdRef.current = null;
+      await loadQueue();
     } finally {
-      setSkipping(false);
+      setTransitioning(false);
     }
   }
 
   async function startNext() {
     const next = upNext[0];
     if (!next) return;
-    setStartingNext(true);
+    setTransitioning(true);
     try {
       await supabase.from("queue_items").update({ status: "now_playing" }).eq("id", next.id);
+      await loadQueue();
     } finally {
-      setStartingNext(false);
+      setTransitioning(false);
     }
   }
 
   async function clearQueue() {
     if (!window.confirm("Limpar toda a fila da sala? Isso remove os pedidos de todo mundo.")) return;
     setClearingQueue(true);
+    setTransitioning(true);
     try {
       pause();
       setStemUrls({});
@@ -291,8 +294,10 @@ export default function StagePage() {
         .update({ status: "removed" })
         .eq("room_id", roomId)
         .in("status", ["queued", "now_playing"]);
+      await loadQueue();
     } finally {
       setClearingQueue(false);
+      setTransitioning(false);
     }
   }
 
@@ -373,82 +378,90 @@ export default function StagePage() {
         />
       ))}
 
-      {!nowPlaying && (
-        <div className="flex flex-col items-center gap-4 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface">
-            <Music2 className="h-7 w-7 text-muted" />
-          </div>
-          <h1 className="text-2xl font-semibold">Nada tocando</h1>
-          {upNext.length === 0 && (
-            <p className="text-muted">Fila vazia — peça uma música pelo celular.</p>
-          )}
-          {upNext.length > 0 && upNext[0].songs?.status === "ready" && (
-            <Button icon={<Play className="h-4 w-4" />} loading={startingNext} onClick={startNext} className="mt-2">
-              Tocar próxima: {upNext[0].songs?.title}
-            </Button>
-          )}
-          {upNext.length > 0 && upNext[0].songs && upNext[0].songs.status !== "ready" && (
-            <div className="flex w-full max-w-sm flex-col items-center gap-2">
-              <p className="text-muted">
-                Próxima música ({upNext[0].songs.title}):{" "}
-                {upNext[0].songs.status === "failed"
-                  ? SONG_STATUS_LABEL.failed
-                  : (latestProcessingJob(upNext[0].songs.processing_jobs)?.stage_label ??
-                    SONG_STATUS_LABEL[upNext[0].songs.status])}
-              </p>
-              {upNext[0].songs.status !== "failed" && (
-                <ProgressBar percent={latestProcessingJob(upNext[0].songs.processing_jobs)?.progress_pct ?? 0} />
+      {transitioning ? (
+        <div className="flex flex-col items-center gap-3 text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted" />
+          <p className="text-muted">Trocando de música…</p>
+        </div>
+      ) : (
+        <>
+          {!nowPlaying && (
+            <div className="flex flex-col items-center gap-4 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface">
+                <Music2 className="h-7 w-7 text-muted" />
+              </div>
+              <h1 className="text-2xl font-semibold">Nada tocando</h1>
+              {upNext.length === 0 && (
+                <p className="text-muted">Fila vazia — peça uma música pelo celular.</p>
+              )}
+              {upNext.length > 0 && upNext[0].songs?.status === "ready" && (
+                <Button icon={<Play className="h-4 w-4" />} onClick={startNext} className="mt-2">
+                  Tocar próxima: {upNext[0].songs?.title}
+                </Button>
+              )}
+              {upNext.length > 0 && upNext[0].songs && upNext[0].songs.status !== "ready" && (
+                <div className="flex w-full max-w-sm flex-col items-center gap-2">
+                  <p className="text-muted">
+                    Próxima música ({upNext[0].songs.title}):{" "}
+                    {upNext[0].songs.status === "failed"
+                      ? SONG_STATUS_LABEL.failed
+                      : (latestProcessingJob(upNext[0].songs.processing_jobs)?.stage_label ??
+                        SONG_STATUS_LABEL[upNext[0].songs.status])}
+                  </p>
+                  {upNext[0].songs.status !== "failed" && (
+                    <ProgressBar percent={latestProcessingJob(upNext[0].songs.processing_jobs)?.progress_pct ?? 0} />
+                  )}
+                </div>
               )}
             </div>
           )}
-        </div>
-      )}
 
-      {nowPlaying && (
-        <div className="flex w-full max-w-xl flex-col items-center gap-6">
-          <div className="text-center">
-            <p className="text-sm font-medium uppercase tracking-wide text-muted">Tocando agora</p>
-            <h1 className="text-3xl font-semibold">{nowPlaying.songs?.title}</h1>
-            {nowPlaying.songs?.artist_guess && <p className="text-muted">{nowPlaying.songs.artist_guess}</p>}
-          </div>
+          {nowPlaying && (
+            <div className="flex w-full max-w-xl flex-col items-center gap-6">
+              <div className="text-center">
+                <p className="text-sm font-medium uppercase tracking-wide text-muted">Tocando agora</p>
+                <h1 className="text-3xl font-semibold">{nowPlaying.songs?.title}</h1>
+                {nowPlaying.songs?.artist_guess && <p className="text-muted">{nowPlaying.songs.artist_guess}</p>}
+              </div>
 
-          <LyricsView lines={lyricsLines} currentIndex={currentLyricIdx} />
+              <LyricsView lines={lyricsLines} currentIndex={currentLyricIdx} />
 
-          {loadingSong && (
-            <p className="flex items-center gap-2 text-sm text-muted">
-              <Loader2 className="h-4 w-4 animate-spin" /> Carregando música…
-            </p>
-          )}
-
-          <div className="flex items-center gap-4">
-            <button
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-accent to-accent-2 text-accent-foreground shadow-lg shadow-accent/30 transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={isPlaying ? pause : play}
-              disabled={!stemUrls.instrumental || togglingPlay}
-              aria-label={isPlaying ? "Pausar" : "Tocar"}
-            >
-              {togglingPlay ? (
-                <Loader2 className="h-7 w-7 animate-spin" />
-              ) : isPlaying ? (
-                <Pause className="h-7 w-7" />
-              ) : (
-                <Play className="ml-0.5 h-7 w-7" />
+              {loadingSong && (
+                <p className="flex items-center gap-2 text-sm text-muted">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Carregando música…
+                </p>
               )}
-            </button>
-            {upNext.length > 0 && (
-              <IconButton
-                icon={<SkipForward className="h-5 w-5" />}
-                aria-label="Pular para a próxima música"
-                loading={skipping}
-                onClick={skipSong}
-              />
-            )}
-          </div>
 
-          {upNext.length > 0 && (
-            <p className="text-sm text-muted">Próxima: {upNext[0].songs?.title}</p>
+              <div className="flex items-center gap-4">
+                <button
+                  className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-accent to-accent-2 text-accent-foreground shadow-lg shadow-accent/30 transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={isPlaying ? pause : play}
+                  disabled={!stemUrls.instrumental || togglingPlay}
+                  aria-label={isPlaying ? "Pausar" : "Tocar"}
+                >
+                  {togglingPlay ? (
+                    <Loader2 className="h-7 w-7 animate-spin" />
+                  ) : isPlaying ? (
+                    <Pause className="h-7 w-7" />
+                  ) : (
+                    <Play className="ml-0.5 h-7 w-7" />
+                  )}
+                </button>
+                {upNext.length > 0 && (
+                  <IconButton
+                    icon={<SkipForward className="h-5 w-5" />}
+                    aria-label="Pular para a próxima música"
+                    onClick={markPlayedAndAdvance}
+                  />
+                )}
+              </div>
+
+              {upNext.length > 0 && (
+                <p className="text-sm text-muted">Próxima: {upNext[0].songs?.title}</p>
+              )}
+            </div>
           )}
-        </div>
+        </>
       )}
 
       <MixerPanel tracks={mixerTracks} onVolumeChange={setVolume} onToggleMute={toggleMute} />
