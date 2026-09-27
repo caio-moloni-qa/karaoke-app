@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ListMusic, Mic2, Monitor, Pencil, Plus, Search, Sparkles, Volume2, X } from "lucide-react";
+import { ListMusic, Mic2, Monitor, Music2, Pencil, Plus, Search, Sparkles, Volume2, X } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useYoutubePreview } from "@/lib/useYoutubePreview";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
@@ -458,8 +458,16 @@ export default function RoomRemotePage() {
         )}
         <ul className="flex flex-col gap-2">
           {filteredLibrary.map((song) => (
-            <li key={song.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-surface px-4 py-3">
-              <div className="min-w-0">
+            <li key={song.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+              {song.thumbnail_url ? (
+                // eslint-disable-next-line @next/next/no-img-element -- external, unsized YouTube thumbnail
+                <img src={song.thumbnail_url} alt="" className="h-10 w-14 shrink-0 rounded-lg object-cover" />
+              ) : (
+                <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-surface-hover">
+                  <Music2 className="h-4 w-4 text-muted" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <p className="truncate font-medium">{song.title}</p>
                   {hasLyrics(song) && (
