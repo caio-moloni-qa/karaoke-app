@@ -5,6 +5,22 @@
 export type StemType = "original" | "instrumental" | "lead_vocal" | "backing_vocal";
 export type SongStatus = "pending" | "queued" | "processing" | "ready" | "failed";
 export type QueueItemStatus = "queued" | "now_playing" | "played" | "removed";
+export type ProcessingJobStatus =
+  | "queued"
+  | "claimed"
+  | "downloading"
+  | "separating"
+  | "uploading"
+  | "done"
+  | "error";
+
+export const SONG_STATUS_LABEL: Record<SongStatus, string> = {
+  pending: "Na fila para processar",
+  queued: "Na fila para processar",
+  processing: "Processando…",
+  ready: "Pronta",
+  failed: "Falhou ao processar",
+};
 
 export interface Room {
   id: string;
@@ -30,6 +46,8 @@ export interface Song {
   duration_seconds: number | null;
   thumbnail_url: string | null;
   status: SongStatus;
+  detected_key: string | null;
+  detected_scale: string | null;
   created_at: string;
 }
 
@@ -52,6 +70,20 @@ export interface QueueItem {
 }
 
 export interface QueueItemWithSong extends QueueItem {
-  songs: Pick<Song, "id" | "title" | "artist_guess"> | null;
+  songs: Pick<Song, "id" | "title" | "artist_guess" | "status"> | null;
   guests: Pick<Guest, "id" | "display_name"> | null;
+}
+
+export interface ProcessingJob {
+  id: string;
+  song_id: string;
+  room_id: string;
+  requested_by: string | null;
+  status: ProcessingJobStatus;
+  stage_label: string | null;
+  progress_pct: number;
+  claimed_by_worker: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
 }

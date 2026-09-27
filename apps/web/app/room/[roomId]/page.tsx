@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createBrowserClient } from "@/lib/supabase/browser";
-import type { QueueItemWithSong, Song } from "@/lib/types";
+import { useYoutubePreview } from "@/lib/useYoutubePreview";
+import { SONG_STATUS_LABEL, type QueueItemWithSong, type Song } from "@/lib/types";
+import type { YoutubeSearchResult } from "@/lib/youtube";
 
 interface GuestSession {
   guestId: string;
@@ -18,6 +20,7 @@ function guestStorageKey(roomId: string) {
 export default function RoomRemotePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const supabase = useMemo(() => createBrowserClient(), []);
+  const { preview, playerElementId } = useYoutubePreview();
 
   const [guest, setGuest] = useState<GuestSession | null>(() => {
     if (typeof window === "undefined") return null;
@@ -28,27 +31,34 @@ export default function RoomRemotePage() {
   const [library, setLibrary] = useState<Song[]>([]);
   const [queue, setQueue] = useState<QueueItemWithSong[]>([]);
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<YoutubeSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+
   const loadQueue = useCallback(async () => {
     const { data } = await supabase
       .from("queue_items")
-      .select("*, songs(id, title, artist_guess), guests(id, display_name)")
+      .select("*, songs(id, title, artist_guess, status), guests(id, display_name)")
       .eq("room_id", roomId)
       .in("status", ["queued", "now_playing"])
       .order("added_at", { ascending: true });
     setQueue((data as QueueItemWithSong[]) ?? []);
   }, [roomId, supabase]);
 
-  useEffect(() => {
-    supabase
+  const loadLibrary = useCallback(async () => {
+    const { data } = await supabase
       .from("songs")
       .select("*")
       .eq("status", "ready")
-      .order("title", { ascending: true })
-      .then(({ data }) => setLibrary((data as Song[]) ?? []));
+      .order("title", { ascending: true });
+    setLibrary((data as Song[]) ?? []);
+  }, [supabase]);
 
+  useEffect(() => {
     // Initial load + realtime subscription is the sanctioned pattern for
     // syncing with an external store; the fetch itself is async.
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadLibrary();
     loadQueue();
 
     const channel = supabase
@@ -58,12 +68,16 @@ export default function RoomRemotePage() {
         { event: "*", schema: "public", table: "queue_items", filter: `room_id=eq.${roomId}` },
         () => loadQueue()
       )
+      .on("postgres_changes", { event: "*", schema: "public", table: "songs" }, () => {
+        loadQueue();
+        loadLibrary();
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [roomId, supabase, loadQueue]);
+  }, [roomId, supabase, loadQueue, loadLibrary]);
 
   async function joinRoom() {
     const name = nameInput.trim();
@@ -81,6 +95,36 @@ export default function RoomRemotePage() {
     const session: GuestSession = { guestId: data.id, clientToken, displayName: name };
     localStorage.setItem(guestStorageKey(roomId), JSON.stringify(session));
     setGuest(session);
+  }
+
+  async function runSearch() {
+    const q = searchQuery.trim();
+    if (!q) return;
+    setSearching(true);
+    try {
+      const res = await fetch(`/api/youtube/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setSearchResults(data.results ?? []);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function requestSong(result: YoutubeSearchResult) {
+    if (!guest) return;
+    await fetch(`/api/rooms/${roomId}/songs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        videoId: result.videoId,
+        title: result.title,
+        channelTitle: result.channelTitle,
+        durationSeconds: result.durationSeconds,
+        thumbnailUrl: result.thumbnailUrl,
+        guestId: guest.guestId,
+        clientToken: guest.clientToken,
+      }),
+    });
   }
 
   async function addToQueue(songId: string) {
@@ -126,6 +170,8 @@ export default function RoomRemotePage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 px-6 py-8">
+      <div id={playerElementId} className="pointer-events-none absolute h-0 w-0 overflow-hidden" />
+
       <header>
         <p className="text-sm text-zinc-500">Sala</p>
         <h1 className="text-lg font-semibold">Olá, {guest.displayName}</h1>
@@ -143,7 +189,12 @@ export default function RoomRemotePage() {
               <div>
                 <p className="font-medium">{item.songs?.title}</p>
                 <p className="text-xs text-zinc-500">
-                  {item.status === "now_playing" ? "Tocando agora" : "Na fila"} · pedido por{" "}
+                  {item.status === "now_playing"
+                    ? "Tocando agora"
+                    : item.songs && item.songs.status !== "ready"
+                      ? SONG_STATUS_LABEL[item.songs.status]
+                      : "Na fila"}
+                  {" · pedido por "}
                   {item.guests?.display_name ?? "?"}
                 </p>
               </div>
@@ -161,11 +212,58 @@ export default function RoomRemotePage() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">Músicas disponíveis</h2>
+        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">Buscar no YouTube</h2>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 rounded border border-black/20 px-3 py-2 dark:border-white/20"
+            placeholder="Nome da música ou artista"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && runSearch()}
+          />
+          <button
+            className="rounded bg-foreground px-4 py-2 text-sm text-background disabled:opacity-40"
+            disabled={!searchQuery.trim() || searching}
+            onClick={runSearch}
+          >
+            {searching ? "..." : "Buscar"}
+          </button>
+        </div>
+        <ul className="flex flex-col gap-2">
+          {searchResults.map((result) => (
+            <li
+              key={result.videoId}
+              className="flex items-center gap-3 rounded border border-black/10 px-3 py-2 dark:border-white/10"
+            >
+              {result.thumbnailUrl && (
+                // eslint-disable-next-line @next/next/no-img-element -- thumbnails are external, unsized YouTube URLs
+                <img src={result.thumbnailUrl} alt="" className="h-12 w-16 rounded object-cover" />
+              )}
+              <div className="flex-1 overflow-hidden">
+                <p className="truncate font-medium">{result.title}</p>
+                <p className="truncate text-xs text-zinc-500">{result.channelTitle}</p>
+              </div>
+              <button
+                className="rounded border border-black/20 px-2 py-1 text-xs dark:border-white/20"
+                onClick={() => preview(result.videoId, result.durationSeconds)}
+              >
+                ouvir 5s
+              </button>
+              <button
+                className="rounded bg-foreground px-3 py-1 text-xs text-background"
+                onClick={() => requestSong(result)}
+              >
+                + fila
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">Já prontas</h2>
         {library.length === 0 && (
-          <p className="text-sm text-zinc-500">
-            Nenhuma música pronta ainda (o worker de download/separação chega na MVP2).
-          </p>
+          <p className="text-sm text-zinc-500">Nenhuma música processada ainda.</p>
         )}
         <ul className="flex flex-col gap-2">
           {library.map((song) => (

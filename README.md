@@ -14,16 +14,17 @@ que faz polling na API do app em vez de expor porta nenhuma.
 ## Estrutura
 
 - `apps/web` — Next.js (App Router). Ver `apps/web/README.md`.
-- `apps/worker` — worker Python local (GPU), a partir da MVP2.
+- `apps/worker` — worker Python local (GPU). Ver `apps/worker/README.md`.
 - `supabase/migrations` — schema do Postgres.
 - `supabase/seed.sql` — dados de demonstração para testar a MVP1 sem worker.
 
 ## Roteiro de MVPs
 
-1. **MVP1** (atual) — palco + controle remoto + fila em tempo real, com uma
-   música semeada manualmente (sem busca no YouTube nem worker ainda).
-2. **MVP2** — worker real (`yt-dlp` + separação de stems + detecção de
-   tom/escala) e busca de música no YouTube pelo remote.
+1. **MVP1** — palco + controle remoto + fila em tempo real, com uma música
+   semeada manualmente (sem busca no YouTube nem worker ainda).
+2. **MVP2** (atual) — worker real (`yt-dlp` + separação de stems em 2 estágios
+   via GPU + detecção de tom/escala) e busca de música no YouTube pelo
+   remote, com preview de 5s do meio da música.
 3. **MVP3** — letra sincronizada (LRCLIB) e arte de fundo (iTunes API).
 4. **MVP4** — entrada de sala via QR code, indicador de worker online/offline,
    modo tela cheia.
@@ -46,4 +47,18 @@ que faz polling na API do app em vez de expor porta nenhuma.
    `/room/<roomId>` (o controle — abra pelo celular na mesma rede, ou em outra
    aba do navegador).
 
-`YOUTUBE_API_KEY` e `WORKER_API_KEY` só passam a ser necessárias na MVP2.
+## Setup (MVP2 — busca no YouTube + worker)
+
+1. Gere uma `YOUTUBE_API_KEY` no [Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com)
+   (ative a "YouTube Data API v3" e crie uma API key) e defina uma
+   `WORKER_API_KEY` própria (qualquer string longa e aleatória — é o segredo
+   compartilhado entre o worker e o app). Preencha as duas em
+   `apps/web/.env.local`.
+2. Rode `alter publication supabase_realtime add table songs;` no SQL Editor
+   do Supabase (além do `queue_items` da MVP1) — o remote e o palco agora
+   também escutam mudanças de status em `songs`.
+3. Siga `apps/worker/README.md` para configurar o worker Python (venv com
+   Python 3.11, ffmpeg, dependências, `.env`) e rode `python worker.py`.
+4. No `/room/<roomId>`, busque uma música no YouTube, ouça o preview de 5s e
+   adicione à fila — o worker vai baixar, separar os stems e marcar a música
+   como pronta; o palco mostra o status até lá.

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { createBrowserClient } from "@/lib/supabase/browser";
-import type { QueueItemWithSong, StemType } from "@/lib/types";
+import { SONG_STATUS_LABEL, type QueueItemWithSong, type StemType } from "@/lib/types";
 
 const TRACKS: { type: StemType; label: string }[] = [
   { type: "instrumental", label: "Instrumental" },
@@ -40,7 +40,7 @@ export default function StagePage() {
   const loadQueue = useCallback(async () => {
     const { data } = await supabase
       .from("queue_items")
-      .select("*, songs(id, title, artist_guess), guests(id, display_name)")
+      .select("*, songs(id, title, artist_guess, status), guests(id, display_name)")
       .eq("room_id", roomId)
       .in("status", ["queued", "now_playing"])
       .order("added_at", { ascending: true });
@@ -59,6 +59,7 @@ export default function StagePage() {
         { event: "*", schema: "public", table: "queue_items", filter: `room_id=eq.${roomId}` },
         () => loadQueue()
       )
+      .on("postgres_changes", { event: "*", schema: "public", table: "songs" }, () => loadQueue())
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -146,15 +147,24 @@ export default function StagePage() {
       {!nowPlaying && (
         <div className="flex flex-col items-center gap-4 text-center">
           <h1 className="text-2xl font-semibold">Nada tocando</h1>
-          {upNext.length > 0 ? (
+          {upNext.length === 0 && (
+            <p className="text-zinc-500">Fila vazia — peça uma música pelo celular.</p>
+          )}
+          {upNext.length > 0 && upNext[0].songs?.status === "ready" && (
             <button
               className="rounded bg-foreground px-6 py-3 text-background"
               onClick={startNext}
             >
               Tocar próxima: {upNext[0].songs?.title}
             </button>
-          ) : (
-            <p className="text-zinc-500">Fila vazia — peça uma música pelo celular.</p>
+          )}
+          {upNext.length > 0 && upNext[0].songs && upNext[0].songs.status !== "ready" && (
+            <p className="text-zinc-500">
+              Próxima música ({upNext[0].songs.title}):{" "}
+              {upNext[0].songs.status === "failed"
+                ? SONG_STATUS_LABEL.failed
+                : SONG_STATUS_LABEL[upNext[0].songs.status]}
+            </p>
           )}
         </div>
       )}

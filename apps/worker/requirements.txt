@@ -1,0 +1,15 @@
+# Install with:
+#   pip install -r requirements.txt
+#   pip install --index-url https://download.pytorch.org/whl/cu124 --force-reinstall torch torchvision
+# (two steps: PyPI's default `torch` wheel on Windows is CPU-only; the
+# second command swaps in the CUDA build. Mixing both indices in one
+# `pip install` call makes torch's resolved version unpredictable, so this
+# is two separate commands rather than one --extra-index-url requirements
+# file. Check your CUDA driver version with `nvidia-smi` and use the
+# matching PyTorch index if cu124 doesn't fit.)
+
+yt-dlp
+audio-separator[gpu]
+librosa
+requests
+python-dotenv
