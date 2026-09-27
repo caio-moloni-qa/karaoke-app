@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface YTPlayer {
   loadVideoById(opts: { videoId: string; startSeconds?: number }): void;
@@ -40,11 +40,15 @@ const PREVIEW_ELEMENT_ID = "youtube-preview-player";
 const PREVIEW_DURATION_MS = 5000;
 
 // Plays 5s from the middle of a video — the same "confirm this is the right
-// song" preview from the original inspiration — via a 0x0 IFrame player.
+// song" preview from the original inspiration. Uses a small but genuinely
+// visible player rather than a 0x0 hidden one: mobile browsers are far more
+// aggressive about blocking autoplay-with-sound on invisible/zero-size
+// iframes (a common ad-fraud pattern), even from a direct tap.
 export function useYoutubePreview() {
   const playerRef = useRef<YTPlayer | null>(null);
   const readyRef = useRef(false);
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [previewingVideoId, setPreviewingVideoId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,8 +58,8 @@ export function useYoutubePreview() {
       // this screen at all), there's nothing to attach to yet.
       if (cancelled || !window.YT || !document.getElementById(PREVIEW_ELEMENT_ID)) return;
       playerRef.current = new window.YT.Player(PREVIEW_ELEMENT_ID, {
-        height: "0",
-        width: "0",
+        height: "90",
+        width: "160",
         events: { onReady: () => (readyRef.current = true) },
       });
     });
@@ -72,8 +76,12 @@ export function useYoutubePreview() {
     const startSeconds = Math.max(0, Math.floor(durationSeconds / 2));
     playerRef.current.loadVideoById({ videoId, startSeconds });
     playerRef.current.playVideo();
-    stopTimerRef.current = setTimeout(() => playerRef.current?.pauseVideo(), PREVIEW_DURATION_MS);
+    setPreviewingVideoId(videoId);
+    stopTimerRef.current = setTimeout(() => {
+      playerRef.current?.pauseVideo();
+      setPreviewingVideoId(null);
+    }, PREVIEW_DURATION_MS);
   }
 
-  return { preview, playerElementId: PREVIEW_ELEMENT_ID };
+  return { preview, playerElementId: PREVIEW_ELEMENT_ID, previewingVideoId };
 }

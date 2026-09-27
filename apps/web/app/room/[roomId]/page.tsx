@@ -35,7 +35,7 @@ export default function RoomRemotePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const router = useRouter();
   const supabase = useMemo(() => createBrowserClient(), []);
-  const { preview, playerElementId } = useYoutubePreview();
+  const { preview, playerElementId, previewingVideoId } = useYoutubePreview();
 
   // Starts null on both server and the client's first render so hydration
   // matches; the real value (if any) is only known after mount, since
@@ -300,7 +300,12 @@ export default function RoomRemotePage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 px-5 py-8">
-      <div id={playerElementId} className="pointer-events-none absolute h-0 w-0 overflow-hidden" />
+      {/* Small but genuinely visible (not 0x0) — mobile browsers are much
+          more aggressive about blocking autoplay-with-sound on
+          invisible/zero-size iframes, even from a direct tap. */}
+      <div className="fixed bottom-4 right-4 z-20 overflow-hidden rounded-xl border border-border bg-surface shadow-lg">
+        <div id={playerElementId} />
+      </div>
 
       <header className="flex items-center justify-between gap-3">
         <div>
@@ -435,8 +440,8 @@ export default function RoomRemotePage() {
                     <p className="truncate text-xs text-muted">{result.channelTitle}</p>
                   </div>
                   <IconButton
-                    variant="ghost"
-                    icon={<Volume2 className="h-4 w-4" />}
+                    variant={previewingVideoId === result.videoId ? "primary" : "ghost"}
+                    icon={<Volume2 className={previewingVideoId === result.videoId ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />}
                     aria-label="Ouvir prévia de 5s"
                     onClick={() => preview(result.videoId, result.durationSeconds)}
                   />
