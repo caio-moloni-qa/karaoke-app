@@ -1,8 +1,10 @@
 .venv/
 work/
+storage/
 models_cache/
 __pycache__/
 *.pyc
+*.log
 
 .env
 !.env.example

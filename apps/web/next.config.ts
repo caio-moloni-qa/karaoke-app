@@ -1,20 +1,25 @@
+import { networkInterfaces } from "node:os";
 import type { NextConfig } from "next";
 
+// Next.js blocks cross-origin requests to dev-mode resources (HMR, client
+// bootstrap) from anything but localhost. Phones on the Wi-Fi reach the dev
+// server through the host's LAN IP, so that IP must be allowed — otherwise
+// the control panel loads as a blank page on phones only. It used to be
+// hardcoded and broke every time DHCP handed out a new address, so it's now
+// read from the network interfaces at startup (restart after switching
+// networks). The sslip.io names resolve straight back to those IPs, for
+// opening the app through a hostname instead of a bare IP.
+function lanAddresses(): string[] {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((iface) => iface && iface.family === "IPv4" && !iface.internal)
+    .map((iface) => iface!.address);
+}
+
+const lanIps = lanAddresses();
+
 const nextConfig: NextConfig = {
-  // Next.js blocks cross-origin requests to dev-mode resources (HMR, etc.)
-  // by default — only `localhost` is trusted out of the box. Phones/other
-  // devices on the LAN hit the dev server via its LAN IP instead, which
-  // silently broke the client bootstrap for them specifically (desktop
-  // testing via localhost never showed the problem). Add your machine's
-  // current LAN IP here if it changes (e.g. after a DHCP lease renewal).
-  // 192-168-15-5.sslip.io is a free wildcard-DNS hostname that resolves
-  // straight to 192.168.15.5 — used so the phone accesses the app via a
-  // real-looking hostname instead of a bare IP. YouTube's embedded IFrame
-  // player showed "video unavailable" only when accessed via the raw IP
-  // (confirmed: the same video played fine on desktop via localhost),
-  // consistent with known issues in YouTube's embed origin validation for
-  // bare-IP origins.
-  allowedDevOrigins: ["192.168.15.5", "192-168-15-5.sslip.io"],
+  allowedDevOrigins: [...lanIps, ...lanIps.map((ip) => `${ip.replace(/\./g, "-")}.sslip.io`)],
 };
 
 export default nextConfig;

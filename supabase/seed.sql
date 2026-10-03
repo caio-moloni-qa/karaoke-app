@@ -2,9 +2,10 @@
 -- something real to render before the YouTube/worker pipeline exists (MVP2).
 --
 -- To use it:
---   1. In Supabase Studio -> Storage, open the "stems" bucket (created by
---      migration 0002) and upload three short test audio files at the
---      bucket root, named to match the storage_path values below:
+--   1. Create `apps/worker/storage/` and place three short test audio files
+--      at its root, named to match the storage_path values below (audio is
+--      served from local disk, not Supabase Storage — see
+--      apps/web/lib/stemsStorage.ts):
 --        instrumental.mp3
 --        lead_vocal.mp3
 --        backing_vocal.mp3

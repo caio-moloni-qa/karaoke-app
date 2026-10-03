@@ -57,3 +57,17 @@ export async function searchYoutube(query: string): Promise<YoutubeSearchResult[
     durationSeconds: parseIso8601Duration(item.contentDetails.duration),
   }));
 }
+
+// For automatic picks only (no human reviewing the result) — a plain query
+// often ranks an official music video top, and those frequently open with
+// footage that isn't the song itself (a skit, dialogue, an extended
+// instrumental intro cut for the video). Synced lyrics assume t=0 is the
+// start of the song, so that non-song footage throws sync off for however
+// long it runs. Appending "lyrics" strongly biases YouTube's ranking toward
+// lyric-video uploads, which are produced to start exactly on the song and
+// don't carry that extra footage. Manual search (human picks from the
+// results) intentionally stays unbiased — see searchYoutube above.
+export async function searchYoutubeForAutoImport(query: string): Promise<YoutubeSearchResult[]> {
+  const lyricResults = await searchYoutube(`${query} lyrics`);
+  return lyricResults.length > 0 ? lyricResults : searchYoutube(query);
+}

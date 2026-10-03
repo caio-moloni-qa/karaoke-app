@@ -47,6 +47,12 @@ export function parseSearchableTrack(rawTitle: string, channelHint?: string): Se
   title = title.replace(junkPattern, "");
   title = title.split("|")[0];
   title = title.replace(/\s+(feat\.?|ft\.?)\s+.+$/i, "");
+  // New-single uploads often append promo text that isn't bracketed, so the
+  // strip above misses it: a quoted upcoming-release name ("... "An Ending
+  // In Itself" OUT 6/12/26"), or an "out <date>"/"available now" announcement.
+  title = title.replace(/\s*["“].*$/, "");
+  title = title.replace(/\s+out\s+\d.*$/i, "");
+  title = title.replace(/\s+\b(available now|pre-?order|pre-?save)\b.*$/i, "");
   title = title.replace(/\s{2,}/g, " ").trim();
 
   const cleanedChannel = cleanChannelName(channelHint);

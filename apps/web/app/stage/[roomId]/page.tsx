@@ -57,6 +57,7 @@ export default function StagePage() {
   const [lyricsLines, setLyricsLines] = useState<LrcLine[]>([]);
   const [lyricsOffsetMs, setLyricsOffsetMs] = useState(0);
   const [currentLyricIdx, setCurrentLyricIdx] = useState(-1);
+  const [singingCountdown, setSingingCountdown] = useState<number | null>(null);
   const [background, setBackground] = useState<Background | null>(null);
   const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -110,6 +111,16 @@ export default function StagePage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- window.location isn't available during SSR
     setRoomUrl(`${window.location.origin}/room/${roomId}`);
+    // Opened as localhost on the host PC, the QR code would point phones at
+    // themselves — swap in the host's LAN address instead.
+    if (["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) {
+      fetch("/api/host-info")
+        .then((res) => res.json())
+        .then((info: { lanUrl: string | null }) => {
+          if (info.lanUrl) setRoomUrl(`${info.lanUrl}/room/${roomId}`);
+        })
+        .catch(() => {});
+    }
   }, [roomId]);
 
   useEffect(() => {
@@ -134,6 +145,7 @@ export default function StagePage() {
     setIsPlaying(false);
     setLyricsLines([]);
     setCurrentLyricIdx(-1);
+    setSingingCountdown(null);
     setBackground(null);
     setLoadingSong(true);
 
@@ -180,10 +192,28 @@ export default function StagePage() {
       .finally(() => setLoadingSong(false));
   }, [nowPlaying]);
 
+  // Earliest line that actually has words — an LRC's first tag is often an
+  // instrumental-intro marker with empty text, which shouldn't anchor the
+  // countdown.
+  const firstSingingLineMs = useMemo(
+    () => lyricsLines.find((line) => line.text.trim() !== "")?.timeMs ?? null,
+    [lyricsLines]
+  );
+
   function onInstrumentalTimeUpdate() {
     const el = audioRefs.current.instrumental;
     if (!el || lyricsLines.length === 0) return;
-    setCurrentLyricIdx(currentLineIndex(lyricsLines, el.currentTime * 1000 - lyricsOffsetMs));
+    const positionMs = el.currentTime * 1000 - lyricsOffsetMs;
+    setCurrentLyricIdx(currentLineIndex(lyricsLines, positionMs));
+
+    // 3-2-1 lead-in so singers can anticipate exactly when the first line
+    // starts, instead of guessing during a silent/instrumental intro.
+    if (firstSingingLineMs != null) {
+      const msUntilSinging = firstSingingLineMs - positionMs;
+      setSingingCountdown(
+        msUntilSinging > 0 && msUntilSinging <= 3000 ? Math.ceil(msUntilSinging / 1000) : null
+      );
+    }
   }
 
   function ensureMixer(): MixerGraph {
@@ -258,6 +288,7 @@ export default function StagePage() {
       setStemUrls({});
       setBackground(null);
       setLyricsLines([]);
+      setSingingCountdown(null);
       setLoadingSong(false);
       currentSongIdRef.current = null;
       await loadQueue();
@@ -287,6 +318,7 @@ export default function StagePage() {
       setStemUrls({});
       setBackground(null);
       setLyricsLines([]);
+      setSingingCountdown(null);
       setLoadingSong(false);
       currentSongIdRef.current = null;
       await supabase
@@ -424,7 +456,7 @@ export default function StagePage() {
                 {nowPlaying.songs?.artist_guess && <p className="text-muted">{nowPlaying.songs.artist_guess}</p>}
               </div>
 
-              <LyricsView lines={lyricsLines} currentIndex={currentLyricIdx} />
+              <LyricsView lines={lyricsLines} currentIndex={currentLyricIdx} countdown={singingCountdown} />
 
               {loadingSong && (
                 <p className="flex items-center gap-2 text-sm text-muted">

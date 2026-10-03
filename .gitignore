@@ -1,0 +1,3 @@
+# Output of scripts\start.ps1 and dev servers
+logs/
+*.log

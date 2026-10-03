@@ -45,5 +45,10 @@ export async function POST(request: Request) {
 
   await supabase.from("songs").update({ status: "processing" }).eq("id", claimed.song_id);
 
+  // Separate from the claim update on purpose: started_at comes from
+  // migration 0007, and until that's applied this write fails on its own
+  // instead of breaking claims (the panel just shows no elapsed time).
+  await supabase.from("processing_jobs").update({ started_at: new Date().toISOString() }).eq("id", claimed.id);
+
   return NextResponse.json({ job: claimed });
 }

@@ -81,6 +81,8 @@ export interface ProcessingJob {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  // When the worker claimed it (migration 0007); absent before that's applied.
+  started_at?: string | null;
 }
 
 export type SongProcessingSummary = Pick<ProcessingJob, "status" | "stage_label" | "progress_pct" | "created_at">;

@@ -6,69 +6,83 @@ separa os vocais em stems via GPU, e deixa misturar instrumental / vocal
 principal / backing vocal na hora. Convidados adicionam músicas à fila pelo
 celular; a TV/monitor mostra o palco com o mixer e a letra.
 
-Arquitetura híbrida: o app (`apps/web`) fica na nuvem (Vercel + Supabase) para
-poder ser acessado de qualquer lugar; o processamento pesado (download +
-separação de stems, que precisa de GPU) roda num worker local na sua máquina,
-que faz polling na API do app em vez de expor porta nenhuma.
+Tudo roda numa máquina só (o "host", de preferência com placa NVIDIA): app
+web, banco de dados (Supabase local, em Docker), worker de processamento e a
+biblioteca de áudio. Os amigos só abrem o app no navegador, na mesma rede
+Wi-Fi. Plano e decisões: [docs/portable-architecture.md](docs/portable-architecture.md).
+
+## Uso no dia a dia
+
+| | |
+|---|---|
+| **Ligar tudo** | dois cliques em `start.cmd` — sobe Docker, banco, app e worker, e mostra os endereços do palco e do controle |
+| **Desligar** | `stop.cmd` (os dados ficam guardados; música interrompida volta pra fila) |
+| **Entrar na sala** | escanear o QR code do palco pelo celular |
+| **Logs** | pasta `logs\` |
+
+## Primeira instalação (Windows)
+
+1. Instale o que faltar (o setup avisa o que está faltando):
+   `winget install OpenJS.NodeJS.LTS Python.Python.3.11 Gyan.FFmpeg Docker.DockerDesktop`
+   e o driver da NVIDIA, se tiver placa. Reinicie o Windows depois do Docker.
+2. `.\scripts\setup.ps1` — instala as dependências, cria o ambiente Python do
+   worker (com PyTorch para GPU se houver NVIDIA), sobe o banco local e gera
+   `apps\web\.env.local` e `apps\worker\.env`.
+3. Preencha em `apps\web\.env.local`:
+   - `YOUTUBE_API_KEY` — [Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com),
+     ative a "YouTube Data API v3" e crie uma API key;
+   - `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` — [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard),
+     crie um app marcando só "Web API" (a conta dona do app precisa ser Premium).
+4. `start.cmd`.
+
+`.\scripts\setup.ps1 -CheckOnly` só confere o que falta, sem mudar nada.
+
+## Biblioteca de áudio em outro disco (ex.: HD externo)
+
+O áudio processado fica em `apps\worker\storage\` por padrão. Para mudar:
+
+```
+stop.cmd
+node scripts\move-library.mjs "E:\Karaoke"        (--dry-run só mostra o tamanho)
+start.cmd
+```
+
+O script copia tudo, confere arquivo por arquivo e aponta o app para a pasta
+nova (`STEMS_STORAGE_DIR` em `apps\web\.env.local`). A cópia antiga fica onde
+estava, para você apagar quando quiser. Se o HD estiver desconectado, o
+controle mostra um aviso e o worker espera em vez de processar músicas que não
+teria onde salvar. No PC host, cada música em "Já prontas" tem um botão para
+abrir a pasta dela.
+
+## Levar para outra máquina
+
+```
+.\scripts\backup.ps1 -Destination E:\KaraokeBackups [-IncludeAudio]
+```
+
+Gera uma pasta com o banco (`database.sql`) e as configurações (que contêm as
+chaves do app — guarde em lugar privado). Na máquina nova, depois do
+`setup.ps1`:
+
+```
+.\scripts\restore.ps1 -Backup E:\KaraokeBackups\karaoke-backup-<data> [-AudioDir E:\Karaoke]
+```
 
 ## Estrutura
 
-- `apps/web` — Next.js (App Router). Ver `apps/web/README.md`.
-- `apps/worker` — worker Python local (GPU). Ver `apps/worker/README.md`.
-- `supabase/migrations` — schema do Postgres.
-- `supabase/seed.sql` — dados de demonstração para testar a MVP1 sem worker.
+- `apps/web` — Next.js (App Router): palco, controle, API.
+- `apps/worker` — worker Python (GPU): baixa do YouTube, separa os stems,
+  detecta tom/escala. Ver `apps/worker/README.md`.
+- `supabase/` — config do Supabase local, migrations e dados de demo.
+- `scripts/` — setup, start/stop, backup/restore, mover biblioteca.
+- `docs/` — plano da arquitetura portátil e formato de importação CSV.
 
-## Roteiro de MVPs
+## Histórico
 
-1. **MVP1** — palco + controle remoto + fila em tempo real, com uma música
-   semeada manualmente (sem busca no YouTube nem worker ainda).
-2. **MVP2** — worker real (`yt-dlp` + separação de stems em 2 estágios
-   via GPU + detecção de tom/escala) e busca de música no YouTube pelo
-   remote, com preview de 5s do meio da música.
-3. **MVP3** — letra sincronizada (LRCLIB) e arte de fundo (iTunes API),
-   editáveis em `/room/<roomId>/songs/<songId>`.
-4. **MVP4** (atual) — entrada de sala via QR code no palco, indicador de
-   worker online/offline, modo tela cheia.
-
-## Setup (MVP1)
-
-1. Crie um projeto no [Supabase](https://supabase.com) e rode as migrations em
-   `supabase/migrations/` (SQL editor do Studio, ou `supabase db push` se
-   tiver a CLI linkada ao projeto).
-2. Em Storage, confirme que o bucket privado `stems` foi criado pela migration
-   `0002_storage.sql`. Faça upload manual de 3 arquivos de áudio de teste na
-   raiz do bucket (`instrumental.mp3`, `lead_vocal.mp3`,
-   `backing_vocal.mp3`) — qualquer trecho curto serve para testar o mixer.
-3. Rode `supabase/seed.sql` (SQL editor do Studio) para criar a sala e a
-   música de demonstração.
-4. Copie `apps/web/.env.example` para `apps/web/.env.local` e preencha com as
-   chaves do projeto (Settings → API): URL, `anon` key e `service_role` key.
-5. `cd apps/web && npm install && npm run dev` e abra `http://localhost:3000`.
-   A home lista a sala de demo com links para `/stage/<roomId>` (a "TV") e
-   `/room/<roomId>` (o controle — abra pelo celular na mesma rede, ou em outra
-   aba do navegador).
-
-## Setup (MVP2 — busca no YouTube + worker)
-
-1. Gere uma `YOUTUBE_API_KEY` no [Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com)
-   (ative a "YouTube Data API v3" e crie uma API key) e defina uma
-   `WORKER_API_KEY` própria (qualquer string longa e aleatória — é o segredo
-   compartilhado entre o worker e o app). Preencha as duas em
-   `apps/web/.env.local`.
-2. Rode `alter publication supabase_realtime add table songs;` no SQL Editor
-   do Supabase (além do `queue_items` da MVP1) — o remote e o palco agora
-   também escutam mudanças de status em `songs`.
-3. Siga `apps/worker/README.md` para configurar o worker Python (venv com
-   Python 3.11, ffmpeg, dependências, `.env`) e rode `python worker.py`.
-4. No `/room/<roomId>`, busque uma música no YouTube, ouça o preview de 5s e
-   adicione à fila — o worker vai baixar, separar os stems e marcar a música
-   como pronta; o palco mostra o status até lá.
-
-## Setup (MVP4 — QR code + status do worker + tela cheia)
-
-1. Rode `supabase/migrations/0005_workers.sql` no SQL Editor do Supabase —
-   cria a tabela `workers` usada pelo indicador online/offline (o worker já
-   escreve nela a cada ciclo de polling, sem mudança nenhuma necessária no
-   `worker.py`).
-2. Nada mais a configurar: o palco (`/stage/<roomId>`) já mostra o QR code
-   pra entrar na sala, o status do worker e um botão de tela cheia.
+1. **MVP1** — palco + controle remoto + fila em tempo real.
+2. **MVP2** — worker (`yt-dlp` + separação em 2 estágios na GPU + tom/escala)
+   e busca no YouTube.
+3. **MVP3** — letra sincronizada (LRCLIB) e arte de fundo (iTunes API).
+4. **MVP4** — QR code no palco, status do worker, tela cheia.
+5. Depois: importação por Spotify / CSV, fila de processamento, áudio local,
+   banco local (Supabase em Docker) e scripts de start/stop/backup.

@@ -6,13 +6,17 @@ import type { LrcLine } from "@/lib/lrc";
 interface LyricsViewProps {
   lines: LrcLine[];
   currentIndex: number;
+  // 3, 2, or 1 for the 3 seconds leading up to the first sung line, null
+  // otherwise — a lead-in cue so singers know exactly when to come in
+  // instead of guessing during a silent/instrumental intro.
+  countdown?: number | null;
 }
 
 // Spotify-style synced lyrics: a scrolling column with the current line
 // highlighted and auto-centered, others dimmed. Uses native scrollIntoView
 // (rather than measuring line heights for a transform) so it handles
 // variable-height wrapped lines for free.
-export function LyricsView({ lines, currentIndex }: LyricsViewProps) {
+export function LyricsView({ lines, currentIndex, countdown }: LyricsViewProps) {
   const lineRefs = useRef<(HTMLParagraphElement | null)[]>([]);
 
   useEffect(() => {
@@ -27,6 +31,13 @@ export function LyricsView({ lines, currentIndex }: LyricsViewProps) {
       className="relative h-72 w-full max-w-xl overflow-y-scroll [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       style={{ maskImage: "linear-gradient(to bottom, transparent, black 25%, black 75%, transparent)" }}
     >
+      {countdown != null && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80">
+          <span key={countdown} className="animate-countdown-pop text-7xl font-bold text-accent">
+            {countdown}
+          </span>
+        </div>
+      )}
       <div className="flex flex-col items-center gap-5 py-32">
         {lines.map((line, i) => (
           <p

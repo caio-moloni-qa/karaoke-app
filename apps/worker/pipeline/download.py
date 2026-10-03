@@ -18,6 +18,12 @@ def download_audio(video_id: str, out_dir: str) -> tuple[str, float]:
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        # YouTube now requires solving a JavaScript challenge to get working
+        # download URLs; without a JS runtime yt-dlp silently gets URLs that
+        # fail with "HTTP Error 403: Forbidden". yt-dlp only looks for Deno
+        # by default — use the Node.js that's already installed instead (with
+        # the yt-dlp-ejs solver scripts from requirements.txt).
+        "js_runtimes": {"node": {}},
     }
 
     # YouTube's bot-detection ("Sign in to confirm you're not a bot")

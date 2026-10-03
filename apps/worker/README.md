@@ -2,10 +2,13 @@
 
 Local script that polls the web app for queued songs, downloads them from
 YouTube, splits them into instrumental / lead vocal / backing vocal via GPU,
-estimates key/scale, and uploads the results straight to Supabase Storage.
-Runs on your machine so the GPU-heavy separation step doesn't need to live in
-the cloud. See the [root README](../../README.md) for how this fits into the
-overall architecture.
+estimates key/scale, and saves the results to the audio library folder. That
+folder is set once, on the web app side (`STEMS_STORAGE_DIR` in
+`apps/web/.env.local`, default `apps/worker/storage/`); the worker asks the web
+app for it at startup, so the two never disagree. Normally started by
+`start.cmd` and set up by `scripts/setup.ps1` — see the
+[root README](../../README.md). The manual steps below are what those scripts
+automate.
 
 ## Prerequisites
 
@@ -15,6 +18,9 @@ overall architecture.
   (installs alongside any other Python version you have).
 - **ffmpeg** on PATH — `winget install Gyan.FFmpeg`. Restart your terminal
   afterwards so the PATH change takes effect.
+- **Node.js** on PATH (already there if you run `apps/web`). YouTube
+  downloads need a JavaScript runtime to solve YouTube's challenge;
+  without one they fail with `HTTP Error 403: Forbidden`.
 - An NVIDIA GPU with a recent driver (`nvidia-smi` should work). CPU-only
   will technically run but stem separation will be very slow.
 
@@ -40,10 +46,6 @@ Should print `True` and your GPU's name. If your driver's CUDA version
 Copy `.env.example` to `.env` and fill in:
 - `WEB_BASE_URL` — where `apps/web` is running (`http://localhost:3000` locally).
 - `WORKER_API_KEY` — must match `apps/web/.env.local`'s `WORKER_API_KEY`.
-- `SUPABASE_ANON_KEY` — same anon key as the web app's `.env.local`. The
-  worker uploads stems directly to Supabase Storage via a signed URL that the
-  web app mints; per Supabase's signed-upload protocol, that upload request
-  still needs a valid `apikey` header alongside the signed token.
 
 ## Running
 
@@ -53,7 +55,10 @@ Copy `.env.example` to `.env` and fill in:
 
 It polls `WEB_BASE_URL` every few seconds for a queued job, and for each one:
 download → separate (2 stages: instrumental/vocals, then lead/backing vocals)
-→ detect key → upload 4 files (original + 3 stems) → mark the song `ready`.
+→ detect key → save 4 files (original + 3 stems) to `<library>/<songId>/` →
+mark the song `ready`. While the library folder is unreachable (e.g. an
+unplugged external HD) it waits instead of taking new songs. A song that was
+mid-processing when the worker stopped goes back in the queue on next start.
 Models download automatically on first use into `models_cache/` (a few
 hundred MB each, one-time).
 

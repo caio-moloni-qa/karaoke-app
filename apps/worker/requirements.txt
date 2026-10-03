@@ -8,7 +8,9 @@
 # file. Check your CUDA driver version with `nvidia-smi` and use the
 # matching PyTorch index if cu124 doesn't fit.)
 
-yt-dlp
+# [default] pulls in yt-dlp-ejs, the YouTube JS-challenge solver (run with
+# Node.js — see pipeline/download.py). Without it downloads fail with 403.
+yt-dlp[default]
 audio-separator[gpu]
 librosa
 requests

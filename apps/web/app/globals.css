@@ -62,3 +62,24 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* Countdown digit pop (LyricsView's "sing in 3-2-1" cue) — re-keyed on every
+   digit change so the animation restarts instead of only playing once. */
+@keyframes countdown-pop {
+  0% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+  30% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-countdown-pop {
+  animation: countdown-pop 1s ease-out;
+}

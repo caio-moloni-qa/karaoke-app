@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import type { Stem, StemType } from "@/lib/types";
 
-const SIGNED_URL_TTL_SECONDS = 60 * 60;
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ songId: string }> }
@@ -30,13 +28,13 @@ export async function GET(
     return NextResponse.json({ error: "Failed to load stems" }, { status: 500 });
   }
 
+  // Served from local disk (see lib/stemsStorage.ts) rather than signed
+  // Supabase Storage URLs — audio is uncompressed WAV and blew through the
+  // project's Storage quota well before the database itself came close to
+  // any limit.
   const stemUrls: Partial<Record<StemType, string>> = {};
   for (const stem of stems as Pick<Stem, "type" | "storage_path">[]) {
-    const { data: signed, error: signError } = await supabase.storage
-      .from("stems")
-      .createSignedUrl(stem.storage_path, SIGNED_URL_TTL_SECONDS);
-    if (signError || !signed) continue;
-    stemUrls[stem.type] = signed.signedUrl;
+    stemUrls[stem.type] = `/api/stems/${stem.storage_path}`;
   }
 
   const { data: lyrics } = await supabase

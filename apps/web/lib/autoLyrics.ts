@@ -1,5 +1,5 @@
 import "server-only";
-import { parseSearchableTrack, searchLrclib, type LrclibResult } from "@/lib/lrclib";
+import { parseSearchableTrack, searchLrclib, type LrclibResult, type SearchableTrack } from "@/lib/lrclib";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
 function normalize(s: string): string {
@@ -28,31 +28,46 @@ function pickBest(results: LrclibResult[], durationSeconds: number | undefined, 
   return candidates.reduce((a, b) => (Math.abs(a.duration - durationSeconds) <= Math.abs(b.duration - durationSeconds) ? a : b));
 }
 
+async function findBest(
+  { track, artist }: SearchableTrack,
+  durationSeconds: number | undefined
+): Promise<LrclibResult | null> {
+  let results: LrclibResult[] = [];
+  try {
+    if (artist) results = await searchLrclib(track, artist);
+    if (results.length === 0) results = await searchLrclib(track);
+  } catch {
+    return null;
+  }
+  return pickBest(results, durationSeconds, artist);
+}
+
 // Best-effort automatic lyrics pick for "Automatic" mode / batch imports.
 // Never overwrites a lyrics row that already exists (e.g. someone already
 // hand-picked one in the editor).
+//
+// `known` is the real artist/title when the import source already had them
+// (Spotify, the AI list, a CSV row) — tried first, since it's far more
+// reliable than reverse-engineering them from a YouTube video title. The
+// parsed video title is still the fallback.
 export async function autoSaveLyrics(
   songId: string,
   title: string,
   channelHint: string | undefined,
-  durationSeconds: number | undefined
+  durationSeconds: number | undefined,
+  known?: SearchableTrack
 ): Promise<boolean> {
   const supabase = createServiceRoleClient();
 
   const { data: existing } = await supabase.from("lyrics").select("song_id").eq("song_id", songId).maybeSingle();
   if (existing) return false;
 
-  const { track, artist } = parseSearchableTrack(title, channelHint);
-
-  let results: LrclibResult[] = [];
-  try {
-    if (artist) results = await searchLrclib(track, artist);
-    if (results.length === 0) results = await searchLrclib(track);
-  } catch {
-    return false;
+  const attempts = [...(known ? [known] : []), parseSearchableTrack(title, channelHint)];
+  let best: LrclibResult | null = null;
+  for (const attempt of attempts) {
+    best = await findBest(attempt, durationSeconds);
+    if (best) break;
   }
-
-  const best = pickBest(results, durationSeconds, artist);
   if (!best) return false;
 
   const { error } = await supabase.from("lyrics").upsert(
