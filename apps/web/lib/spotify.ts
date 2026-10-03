@@ -77,7 +77,10 @@ export interface SpotifyTrackResult {
   artist: string;
   title: string;
   albumName: string;
+  // Small, for result lists.
   imageUrl: string | null;
+  // Full-size album cover: becomes the song's thumbnail and stage background.
+  coverUrl: string | null;
 }
 
 function toTrackResult(track: SpotifyFullTrack): SpotifyTrackResult {
@@ -87,6 +90,7 @@ function toTrackResult(track: SpotifyFullTrack): SpotifyTrackResult {
     title: cleanTrackTitle(track.name),
     albumName: track.album.name,
     imageUrl: thumbnail(track.album.images),
+    coverUrl: largest(track.album.images),
   };
 }
 
@@ -138,6 +142,11 @@ interface SpotifyImage {
 // largest-first, typically 640/300/64px).
 function thumbnail(images: SpotifyImage[]): string | null {
   return ([...images].reverse().find((img) => (img.width ?? 0) >= 64) ?? images[0])?.url ?? null;
+}
+
+// Typically 640px — sharp enough for the stage's full-screen background.
+function largest(images: SpotifyImage[]): string | null {
+  return [...images].sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0]?.url ?? null;
 }
 
 export interface SpotifyAlbumResult {
@@ -204,7 +213,7 @@ interface Paged<T> {
 export interface SpotifyAlbumLookup {
   albumName: string;
   albumArtist: string;
-  songs: { artist: string; title: string }[];
+  songs: { artist: string; title: string; coverUrl: string | null }[];
 }
 
 // " - 2007 Remaster" / " - Remastered 2011" suffixes are catalog metadata,
@@ -221,8 +230,9 @@ export async function lookupSpotifyAlbum(input: string): Promise<SpotifyAlbumLoo
   const albumId = parseAlbumId(input) ?? (await searchAlbumId(input));
   if (!albumId) return null;
 
-  const album = await spotifyGet<{ name: string; artists: SpotifyArtist[] }>(`/albums/${albumId}`);
+  const album = await spotifyGet<{ name: string; artists: SpotifyArtist[]; images: SpotifyImage[] }>(`/albums/${albumId}`);
   const albumArtist = album.artists[0]?.name ?? "";
+  const coverUrl = largest(album.images);
 
   const tracks: SpotifyTrack[] = [];
   let next: string | null = `/albums/${albumId}/tracks?limit=50`;
@@ -238,6 +248,7 @@ export async function lookupSpotifyAlbum(input: string): Promise<SpotifyAlbumLoo
     songs: tracks.map((track) => ({
       artist: track.artists[0]?.name ?? albumArtist,
       title: cleanTrackTitle(track.name),
+      coverUrl,
     })),
   };
 }

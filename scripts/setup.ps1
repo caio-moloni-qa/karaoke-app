@@ -92,7 +92,7 @@ if (Test-Path $python) {
     if ($hasNvidia) {
       # PyPI's default torch on Windows is CPU-only; swap in the CUDA build.
       Write-Host "  installing GPU PyTorch (large download)..."
-      if ((Native { & $python -m pip install --index-url https://download.pytorch.org/whl/cu124 --force-reinstall torch torchvision }) -ne 0) { throw "CUDA PyTorch install failed" }
+      if ((Native { & $python -m pip install --index-url https://download.pytorch.org/whl/cu124 --force-reinstall torch torchvision torchaudio }) -ne 0) { throw "CUDA PyTorch install failed" }
     }
   } finally { Pop-Location }
   Ok "created"

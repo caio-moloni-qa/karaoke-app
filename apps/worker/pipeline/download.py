@@ -1,6 +1,12 @@
 import os
+import time
 
 import yt_dlp
+import yt_dlp.utils
+
+
+DOWNLOAD_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 10
 
 
 def download_audio(video_id: str, out_dir: str) -> tuple[str, float]:
@@ -36,8 +42,19 @@ def download_audio(video_id: str, out_dir: str) -> tuple[str, float]:
     if cookies_browser:
         ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+    # YouTube occasionally refuses one download URL ("HTTP Error 403:
+    # Forbidden") even with the JS challenge solved; a fresh extraction gets a
+    # new URL that works (confirmed on songs that failed overnight and then
+    # downloaded fine). Retry with a fresh extraction before failing the song.
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+            break
+        except yt_dlp.utils.DownloadError as exc:
+            if "403" not in str(exc) or attempt == DOWNLOAD_ATTEMPTS:
+                raise
+            time.sleep(RETRY_DELAY_SECONDS * attempt)
 
     final_path = os.path.join(out_dir, "original.wav")
     return final_path, float(info.get("duration") or 0)

@@ -3,6 +3,7 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 import { ACTIVE_JOB_STATUSES, STALE_JOB_AFTER_MS } from "@/lib/processing";
 
 const WORKER_ONLINE_WITHIN_MS = 15_000;
+const FAILED_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export interface ClearProcessingResult {
   cancelled: number;
@@ -63,4 +64,43 @@ export async function clearProcessingQueue(): Promise<ClearProcessingResult> {
   }
 
   return { cancelled: deletedSongIds.length, stillRunning: running[0]?.songs?.title ?? null };
+}
+
+export interface ClearFailedResult {
+  // Songs that were still failed (no audio) and were removed from the library.
+  removedSongs: number;
+  // Failed-attempt records cleared, including ones a later retry fixed.
+  clearedAttempts: number;
+}
+
+// Cleans up the processing panel's "failed (last 24h)" list: songs whose
+// latest attempt failed and that never got audio are removed entirely (they
+// can be re-added from Spotify or a CSV), and the failed-attempt records are
+// cleared — including stale ones for songs that a retry has since fixed.
+export async function clearFailedProcessing(): Promise<ClearFailedResult> {
+  const supabase = createServiceRoleClient();
+  const since = new Date(Date.now() - FAILED_WINDOW_MS).toISOString();
+
+  const { data: attempts, error } = await supabase
+    .from("processing_jobs")
+    .select("id, song_id, songs!inner(status)")
+    .eq("status", "error")
+    .gte("updated_at", since);
+  if (error) throw new Error(error.message);
+
+  const rows = (attempts ?? []) as unknown as { id: string; song_id: string; songs: { status: string } }[];
+  const failedSongIds = [...new Set(rows.filter((r) => r.songs.status === "failed").map((r) => r.song_id))];
+
+  // Removing a song cascades to its jobs, lyrics and queue entries.
+  if (failedSongIds.length > 0) {
+    const { error: songError } = await supabase.from("songs").delete().in("id", failedSongIds).eq("status", "failed");
+    if (songError) throw new Error(songError.message);
+  }
+  const remaining = rows.filter((r) => !failedSongIds.includes(r.song_id)).map((r) => r.id);
+  if (remaining.length > 0) {
+    const { error: jobError } = await supabase.from("processing_jobs").delete().in("id", remaining);
+    if (jobError) throw new Error(jobError.message);
+  }
+
+  return { removedSongs: failedSongIds.length, clearedAttempts: rows.length };
 }

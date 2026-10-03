@@ -20,6 +20,9 @@ interface ProcessingQueuePanelProps {
   workerOnline: boolean;
   // Resolves to a short status message to show under the header.
   onClear: () => Promise<string>;
+  // Removes the still-failed songs and clears the failed list; resolves to a
+  // short status message.
+  onClearFailed: () => Promise<string>;
 }
 
 // 75s -> "1:15", 3725s -> "1:02:05"
@@ -34,9 +37,9 @@ function formatElapsed(ms: number): string {
 function SongThumb({ url }: { url: string | null | undefined }) {
   return url ? (
     // eslint-disable-next-line @next/next/no-img-element -- external, unsized YouTube thumbnail
-    <img src={url} alt="" className="h-9 w-12 shrink-0 rounded-md object-cover" />
+    <img src={url} alt="" className="h-9 w-9 shrink-0 rounded-md object-cover" />
   ) : (
-    <div className="flex h-9 w-12 shrink-0 items-center justify-center rounded-md bg-surface-hover">
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-hover">
       <Music2 className="h-4 w-4 text-muted" />
     </div>
   );
@@ -45,7 +48,23 @@ function SongThumb({ url }: { url: string | null | undefined }) {
 // The worker's own queue (every song waiting on or going through stem
 // separation, across all rooms — there's one GPU worker), as opposed to the
 // room's singing queue in the middle column.
-export function ProcessingQueuePanel({ active, failed, workerOnline, onClear }: ProcessingQueuePanelProps) {
+export function ProcessingQueuePanel({ active, failed, workerOnline, onClear, onClearFailed }: ProcessingQueuePanelProps) {
+  const [clearingFailed, setClearingFailed] = useState(false);
+
+  async function clearFailed() {
+    const message =
+      `Remover ${failed.length} música(s) com falha? Elas não têm áudio, então nada que já toca é perdido. ` +
+      "Dá para adicionar de novo depois pelo Spotify ou CSV.";
+    if (!window.confirm(message)) return;
+    setClearingFailed(true);
+    setClearMsg(null);
+    try {
+      setClearMsg(await onClearFailed());
+    } finally {
+      setClearingFailed(false);
+    }
+  }
+
   const [now, setNow] = useState(() => Date.now());
   const [clearing, setClearing] = useState(false);
   const [clearMsg, setClearMsg] = useState<string | null>(null);
@@ -157,7 +176,18 @@ export function ProcessingQueuePanel({ active, failed, workerOnline, onClear }: 
 
         {failed.length > 0 && (
           <section className="flex flex-col gap-2">
-            <p className="text-xs font-medium text-muted">Falharam (últimas 24h)</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium text-muted">Falharam (últimas 24h)</p>
+              <Button
+                variant="ghost"
+                loading={clearingFailed}
+                onClick={clearFailed}
+                icon={<Trash2 className="h-3.5 w-3.5" />}
+                className="px-2 py-1 text-xs"
+              >
+                Limpar
+              </Button>
+            </div>
             {failed.map((job) => (
               <div key={job.id} className="flex items-start gap-3 rounded-xl px-1 py-1">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />

@@ -28,7 +28,9 @@ while ((Get-Date) -lt $deadline) {
   $web = WebRunning
   if (-not ($worker -and $web)) {
     Log "worker running: $worker, web running: $web - running start.ps1"
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "start.ps1") *>> $log
+    # Out-File with an explicit encoding: plain *>> redirection writes
+    # UTF-16 in Windows PowerShell 5.1, which garbles the rest of the log.
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "start.ps1") *>&1 | Out-File $log -Append -Encoding utf8
   }
   Start-Sleep -Seconds $IntervalSeconds
 }

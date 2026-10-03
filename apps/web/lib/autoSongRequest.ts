@@ -25,14 +25,22 @@ export interface AutoSongRequestResult {
 // error), so keep it stable rather than rewording freely.
 //
 // `known` is the real artist/title when the source already had them
-// (Spotify, AI list, CSV). It's used to name a new song and to look up its
-// lyrics: the YouTube match is usually a fan lyric-video upload whose title
-// and channel ("... | Lyrics", "TRVPE [Music Lyrics]") are poor for both.
+// (Spotify, CSV). It's used to name a new song and to look up its lyrics:
+// the YouTube match is usually a fan lyric-video upload whose title and
+// channel ("... | Lyrics", "TRVPE [Music Lyrics]") are poor for both. Its
+// `coverUrl` (Spotify album art) replaces the video's thumbnail — both in the
+// lists and as the stage background.
+export interface KnownSong {
+  artist: string;
+  title: string;
+  coverUrl?: string | null;
+}
+
 export async function processAutoSongRequest(
   roomId: string,
   query: string,
   requestedBy: string | null,
-  known?: { artist: string; title: string }
+  known?: KnownSong
 ): Promise<AutoSongRequestResult> {
   const results = await searchYoutubeForAutoImport(query);
   const top = results[0];
@@ -44,11 +52,22 @@ export async function processAutoSongRequest(
       title: known?.title ?? top.title,
       channelTitle: known?.artist ?? top.channelTitle,
       durationSeconds: top.durationSeconds,
-      thumbnailUrl: top.thumbnailUrl,
+      thumbnailUrl: known?.coverUrl ?? top.thumbnailUrl,
     },
     roomId,
     requestedBy
   );
+
+  // A song that already existed keeps its row, so give it the cover too if
+  // it still has a YouTube image (never overrides one already set from
+  // Spotify or elsewhere).
+  if (known?.coverUrl) {
+    await createServiceRoleClient()
+      .from("songs")
+      .update({ thumbnail_url: known.coverUrl })
+      .eq("id", song.id)
+      .like("thumbnail_url", "%ytimg.com%");
+  }
 
   after(() =>
     autoSaveLyrics(

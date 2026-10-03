@@ -1,6 +1,6 @@
 # Install with:
 #   pip install -r requirements.txt
-#   pip install --index-url https://download.pytorch.org/whl/cu124 --force-reinstall torch torchvision
+#   pip install --index-url https://download.pytorch.org/whl/cu124 --force-reinstall torch torchvision torchaudio
 # (two steps: PyPI's default `torch` wheel on Windows is CPU-only; the
 # second command swaps in the CUDA build. Mixing both indices in one
 # `pip install` call makes torch's resolved version unpredictable, so this
@@ -13,5 +13,9 @@
 yt-dlp[default]
 audio-separator[gpu]
 librosa
+# Word-level lyric alignment (pipeline/align.py). torchaudio itself is
+# swapped for the CUDA build together with torch (see the top of this file).
+unidecode
+torchaudio
 requests
 python-dotenv

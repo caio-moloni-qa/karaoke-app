@@ -32,6 +32,9 @@ interface StagedRow {
   artist: string;
   title: string;
   imageUrl?: string | null;
+  // Full-size Spotify album cover — becomes the song's thumbnail and stage
+  // background when imported.
+  coverUrl?: string | null;
   // A CSV row with no confident Spotify match — imported as typed.
   notOnSpotify?: boolean;
 }
@@ -39,7 +42,7 @@ interface StagedRow {
 type StagedInput = Omit<StagedRow, "id">;
 
 interface SpotifySearchResults {
-  tracks: { id: string; artist: string; title: string; albumName: string; imageUrl: string | null }[];
+  tracks: { id: string; artist: string; title: string; albumName: string; imageUrl: string | null; coverUrl: string | null }[];
   albums: { id: string; name: string; artist: string; year: string; totalTracks: number; imageUrl: string | null }[];
   artists: { id: string; name: string; imageUrl: string | null }[];
 }
@@ -160,10 +163,13 @@ export default function RoomRemotePage() {
         .select(columns)
         .in("status", ["queued", "claimed", "downloading", "separating", "uploading"])
         .order("created_at", { ascending: true }),
+      // Only songs that are still failed: an attempt that a later retry
+      // fixed isn't worth showing as a failure.
       supabase
         .from("processing_jobs")
-        .select(columns)
+        .select("*, songs!inner(title, artist_guess, thumbnail_url, status)")
         .eq("status", "error")
+        .eq("songs.status", "failed")
         .gte("updated_at", since)
         .order("updated_at", { ascending: false }),
     ]);
@@ -329,7 +335,7 @@ export default function RoomRemotePage() {
         const key = stagedKey(artist, title);
         if (seen.has(key)) continue;
         seen.add(key);
-        additions.push({ id: generateUUID(), artist, title, imageUrl: row.imageUrl ?? null, notOnSpotify: row.notOnSpotify });
+        additions.push({ id: generateUUID(), artist, title, imageUrl: row.imageUrl ?? null, coverUrl: row.coverUrl ?? null, notOnSpotify: row.notOnSpotify });
       }
       return [...prev, ...additions];
     });
@@ -443,11 +449,13 @@ export default function RoomRemotePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      const matches = data.matches as ({ artist: string; title: string; imageUrl: string | null } | null)[];
+      const matches = data.matches as ({ artist: string; title: string; imageUrl: string | null; coverUrl: string | null } | null)[];
       addStagedRows(
         rows.map((row, i) => {
           const match = matches[i];
-          return match ? { artist: match.artist, title: match.title, imageUrl: match.imageUrl } : { ...row, notOnSpotify: true };
+          return match
+            ? { artist: match.artist, title: match.title, imageUrl: match.imageUrl, coverUrl: match.coverUrl }
+            : { ...row, notOnSpotify: true };
         })
       );
       const missing = matches.filter((m) => !m).length;
@@ -482,7 +490,7 @@ export default function RoomRemotePage() {
       const res = await fetch(`/api/rooms/${roomId}/songs/batch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ songs: stagedRows.map(({ artist, title }) => ({ artist, title })) }),
+        body: JSON.stringify({ songs: stagedRows.map(({ artist, title, coverUrl }) => ({ artist, title, coverUrl })) }),
       });
       const data = await res.json();
       const rowResults = (data.results ?? []) as { status: "added" | "error" }[];
@@ -564,6 +572,25 @@ export default function RoomRemotePage() {
         next.delete(songId);
         return next;
       });
+    }
+  }
+
+  async function clearFailedProcessing(): Promise<string> {
+    if (!guest) return "";
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/processing/clear-failed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guestId: guest.guestId, clientToken: guest.clientToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) return data.error ?? "Não foi possível limpar as falhas.";
+      await Promise.all([loadProcessing(), loadQueue()]);
+      return data.removedSongs > 0
+        ? `${data.removedSongs} música(s) com falha removida(s).`
+        : "Falhas antigas limpas.";
+    } catch {
+      return "Não foi possível limpar as falhas.";
     }
   }
 
@@ -666,9 +693,9 @@ export default function RoomRemotePage() {
                 </span>
                 {item.songs?.thumbnail_url ? (
                   // eslint-disable-next-line @next/next/no-img-element -- external, unsized YouTube thumbnail
-                  <img src={item.songs.thumbnail_url} alt="" className="h-9 w-12 shrink-0 rounded-md object-cover" />
+                  <img src={item.songs.thumbnail_url} alt="" className="h-9 w-9 shrink-0 rounded-md object-cover" />
                 ) : (
-                  <div className="flex h-9 w-12 shrink-0 items-center justify-center rounded-md bg-surface-hover">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-hover">
                     <Music2 className="h-4 w-4 text-muted" />
                   </div>
                 )}
@@ -715,6 +742,7 @@ export default function RoomRemotePage() {
             failed={processingFailed}
             workerOnline={workerOnline}
             onClear={clearProcessing}
+            onClearFailed={clearFailedProcessing}
           />
         </div>
       </div>
@@ -989,9 +1017,9 @@ export default function RoomRemotePage() {
             <ul className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
               {stagedRows.map((row) => (
                 <li key={row.id} className="flex items-center justify-between gap-2 rounded-lg bg-surface-hover px-3 py-2">
-                  {row.imageUrl && (
+                  {(row.imageUrl ?? row.coverUrl) && (
                     // eslint-disable-next-line @next/next/no-img-element -- external Spotify cover art
-                    <img src={row.imageUrl} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+                    <img src={(row.imageUrl ?? row.coverUrl)!} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm">{row.title}</p>
@@ -1078,9 +1106,9 @@ export default function RoomRemotePage() {
             <li key={song.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
               {song.thumbnail_url ? (
                 // eslint-disable-next-line @next/next/no-img-element -- external, unsized YouTube thumbnail
-                <img src={song.thumbnail_url} alt="" className="h-10 w-14 shrink-0 rounded-lg object-cover" />
+                <img src={song.thumbnail_url} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
               ) : (
-                <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-lg bg-surface-hover">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-surface-hover">
                   <Music2 className="h-4 w-4 text-muted" />
                 </div>
               )}

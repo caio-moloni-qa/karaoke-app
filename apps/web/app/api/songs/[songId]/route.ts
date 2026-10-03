@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import type { Stem, StemType } from "@/lib/types";
+import { lyricsHash, type AlignedLine } from "@/lib/lyricsAlignment";
 
 export async function GET(
   _request: Request,
@@ -37,11 +38,22 @@ export async function GET(
     stemUrls[stem.type] = `/api/stems/${stem.storage_path}`;
   }
 
-  const { data: lyrics } = await supabase
+  const { data: lyricsRow } = await supabase
     .from("lyrics")
-    .select("raw_lrc, offset_ms")
+    .select("raw_lrc, offset_ms, word_timings, aligned_hash")
     .eq("song_id", songId)
     .maybeSingle();
+
+  // Word timings only count for the exact lyrics + offset they were aligned
+  // to; after an edit they're stale until the worker re-aligns the song.
+  const lyrics = lyricsRow && {
+    raw_lrc: lyricsRow.raw_lrc,
+    offset_ms: lyricsRow.offset_ms,
+    word_timings:
+      lyricsRow.raw_lrc && lyricsRow.aligned_hash === lyricsHash(lyricsRow.raw_lrc, lyricsRow.offset_ms)
+        ? (lyricsRow.word_timings as AlignedLine[] | null)
+        : null,
+  };
 
   const { data: displaySettings } = await supabase
     .from("song_display_settings")

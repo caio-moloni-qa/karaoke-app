@@ -29,7 +29,7 @@ automate.
 ```bash
 py -3.11 -m venv .venv
 ./.venv/Scripts/pip install -r requirements.txt
-./.venv/Scripts/pip install --index-url https://download.pytorch.org/whl/cu124 --force-reinstall torch torchvision
+./.venv/Scripts/pip install --index-url https://download.pytorch.org/whl/cu124 --force-reinstall torch torchvision torchaudio
 ```
 
 The second command replaces the CPU-only `torch` wheel that PyPI ships by

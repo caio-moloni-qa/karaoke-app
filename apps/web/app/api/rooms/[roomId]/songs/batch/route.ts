@@ -4,6 +4,9 @@ import { processAutoSongRequest } from "@/lib/autoSongRequest";
 interface BatchSong {
   artist?: string;
   title: string;
+  // Spotify album cover, when the row came from Spotify (search, album, or a
+  // CSV row matched there) — becomes the song's thumbnail and background.
+  coverUrl?: string | null;
 }
 
 interface BatchBody {
@@ -34,7 +37,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ roo
   }
 
   const rows = songs
-    .map((song) => ({ artist: song.artist?.trim() ?? "", title: song.title?.trim() ?? "" }))
+    .map((song) => ({ artist: song.artist?.trim() ?? "", title: song.title?.trim() ?? "", coverUrl: song.coverUrl ?? null }))
     .filter((song) => song.title)
     .slice(0, MAX_BATCH_SIZE);
   const results: BatchRowResult[] = [];
@@ -45,14 +48,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ roo
   // make quota exhaustion happen sooner without finishing any faster from
   // YouTube's side.
   for (let i = 0; i < rows.length; i++) {
-    const { artist, title } = rows[i];
+    const { artist, title, coverUrl } = rows[i];
     const query = [artist, title].filter(Boolean).join(" ");
     try {
       // requestedBy is always null here — batch imports only populate the
       // library (triggers processing), they never join today's live queue.
       // A row with both fields is treated as known metadata, used for the
       // song's name and its lyrics lookup.
-      const result = await processAutoSongRequest(roomId, query, null, artist ? { artist, title } : undefined);
+      const result = await processAutoSongRequest(roomId, query, null, artist ? { artist, title, coverUrl } : undefined);
       results.push({ query, status: "added", matchedTitle: result.matchedTitle });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";

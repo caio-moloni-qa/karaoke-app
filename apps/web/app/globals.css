@@ -40,6 +40,25 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
+/* Karaoke-style progressive fill of the current lyric line (LyricsView sets
+   --fill from 0% to 100% as the line is sung). Two background layers
+   clipped to the text: the accent gradient sized to --fill over plain text
+   color. On an inline element the background spans the line's wrapped
+   fragments as if laid end to end, so a line that wraps fills its first row
+   completely before starting the second. */
+.lyric-fill {
+  --fill: 0%;
+  background-image: linear-gradient(90deg, var(--accent), var(--accent-2)),
+    linear-gradient(var(--foreground), var(--foreground));
+  background-size: var(--fill) 100%, 100% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-box-decoration-break: slice;
+  box-decoration-break: slice;
+}
+
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;

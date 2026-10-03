@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { processAutoSongRequest } from "@/lib/autoSongRequest";
+import { processAutoSongRequest, type KnownSong } from "@/lib/autoSongRequest";
+import { searchSpotify } from "@/lib/spotify";
 
 interface AutoBody {
   query: string;
@@ -38,8 +39,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ roo
     requestedBy = guestId;
   }
 
+  // Spotify first, same as the import flows: the top song match gives the
+  // exact artist/title (better YouTube search and lyrics) and the cover art.
+  // If Spotify has nothing or isn't reachable, fall back to the raw text.
+  let known: KnownSong | undefined;
   try {
-    const result = await processAutoSongRequest(roomId, query.trim(), requestedBy);
+    const top = (await searchSpotify(query.trim())).tracks[0];
+    if (top) known = { artist: top.artist, title: top.title, coverUrl: top.coverUrl };
+  } catch {
+    // Spotify unavailable or not configured — YouTube alone still works.
+  }
+
+  try {
+    const result = await processAutoSongRequest(
+      roomId,
+      known ? `${known.artist} ${known.title}` : query.trim(),
+      requestedBy,
+      known
+    );
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to add song";

@@ -11,6 +11,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+from pipeline.align import align_lyrics
 from pipeline.download import download_audio
 from pipeline.key_detect import detect_key
 from pipeline.separate import separate_stems
@@ -189,6 +190,51 @@ def recover_orphaned_jobs() -> None:
         print(f"Couldn't recover interrupted jobs: {exc}")
 
 
+def align_next_song(song_id: str | None = None) -> bool:
+    """Word-times one ready song's lyrics (see pipeline/align.py): the given
+    song right after processing it, or — when idle — any song still needing
+    it (the existing library, lyrics edited since their last alignment).
+    Returns False when nothing needs aligning."""
+    try:
+        res = requests.get(
+            f"{WEB_BASE_URL}/api/worker/alignment/next",
+            params={"songId": song_id} if song_id else None,
+            headers=auth_headers(),
+            timeout=30,
+        )
+        res.raise_for_status()
+        task = res.json().get("task")
+    except (requests.RequestException, ValueError) as exc:
+        print(f"Couldn't fetch lyrics to align: {exc}")
+        return False
+    if not task:
+        return False
+
+    keep_system_awake(True)
+    try:
+        vocals = [str(STORAGE_DIR / path) for path in task["vocalPaths"]]
+        lines = align_lyrics(vocals, task["rawLrc"], task["offsetMs"])
+        payload = {"hash": task["hash"], "lines": lines}
+        print(f"Aligned lyrics word by word: {task['title']} ({len(lines)} lines)")
+    except Exception as exc:
+        traceback.print_exc()
+        payload = {"hash": task["hash"], "error": str(exc)[:500]}
+    finally:
+        keep_system_awake(False)
+
+    try:
+        requests.post(
+            f"{WEB_BASE_URL}/api/worker/alignment/{task['songId']}",
+            json=payload,
+            headers=auth_headers(),
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        print(f"Couldn't save word timings for {task['title']}: {exc}")
+        return False
+    return True
+
+
 def fetch_storage_dir() -> Path:
     # The web app may still be starting (e.g. both launched by the start
     # script), so keep trying rather than exiting.
@@ -240,7 +286,10 @@ def main() -> None:
         if job:
             print(f"Claimed job {job['id']} for song '{job['songs']['title']}'")
             process_job(job)
-        else:
+            # A few seconds per song, so it's word-synced the moment it's
+            # ready rather than after the rest of a batch.
+            align_next_song(job["songs"]["id"])
+        elif not align_next_song():
             time.sleep(POLL_INTERVAL_SECONDS)
 
 
