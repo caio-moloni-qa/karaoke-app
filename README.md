@@ -37,6 +37,34 @@ Wi-Fi. Plano e decisões: [docs/portable-architecture.md](docs/portable-architec
 
 `.\scripts\setup.ps1 -CheckOnly` só confere o que falta, sem mudar nada.
 
+## Atualizar (depois de `git pull`)
+
+Com o app ligado (o banco precisa estar rodando):
+
+```
+npm install --prefix apps\web
+apps\worker\.venv\Scripts\python.exe -m pip install -r apps\worker\requirements.txt
+npx supabase migration up
+```
+
+O `setup.ps1` não reinstala os pacotes do worker se o `.venv` já existe, e o
+`supabase start` só cria as tabelas na primeira vez — migrations novas em
+`supabase\migrations` têm que ser aplicadas com `npx supabase migration up`
+(senão o worker falha ao salvar resultados em colunas que ainda não existem).
+Depois, `stop.cmd` e `start.cmd` para subir o código novo.
+
+## Conferir a sincronia das letras
+
+Depois de alinhar a letra de cada música palavra por palavra, o worker confere
+se ela bate com o canto (letra de outra versão, primeira linha atrasada, linhas
+acendendo sem ninguém cantando) e marca a música na biblioteca quando algo
+parece errado. Para ver a lista:
+
+```
+node scripts\sync-report.mjs          (só as com problema)
+node scripts\sync-report.mjs --all    (todas)
+```
+
 ## Biblioteca de áudio em outro disco (ex.: HD externo)
 
 O áudio processado fica em `apps\worker\storage\` por padrão. Para mudar:
@@ -74,7 +102,8 @@ chaves do app — guarde em lugar privado). Na máquina nova, depois do
 - `apps/worker` — worker Python (GPU): baixa do YouTube, separa os stems,
   detecta tom/escala. Ver `apps/worker/README.md`.
 - `supabase/` — config do Supabase local, migrations e dados de demo.
-- `scripts/` — setup, start/stop, backup/restore, mover biblioteca.
+- `scripts/` — setup, start/stop, backup/restore, mover biblioteca,
+  relatório de sincronia das letras.
 - `docs/` — plano da arquitetura portátil e formato de importação CSV.
 
 ## Histórico
