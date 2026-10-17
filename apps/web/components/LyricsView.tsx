@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import type { AlignedLine, LrcLine } from "@/lib/lrc";
+import { reliableWords, type AlignedLine, type AlignedWord, type LrcLine } from "@/lib/lrc";
 
 interface LyricsViewProps {
   lines: LrcLine[];
@@ -33,49 +33,62 @@ function progress(position: number | null, start: number, end: number): number {
   return Math.min(1, Math.max(0, (position - start) / (end - start)));
 }
 
-// Sizes are 35% above the original text-2xl / text-lg (current / other
-// lines), with the box scaled to match so as many lines stay visible.
+// Sizes are ~80% above the original text-2xl / text-lg (current / other
+// lines: +35%, then +15% twice), with the box scaled to match so as many lines
+// stay visible.
 // Spotify-style synced lyrics: a scrolling column with the current line
 // highlighted and auto-centered, others dimmed. Uses native scrollIntoView
 // (rather than measuring line heights for a transform) so it handles
 // variable-height wrapped lines for free.
 export function LyricsView({ lines, currentIndex, countdown, getPositionMs, wordTimings }: LyricsViewProps) {
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
   const lineRefs = useRef<(HTMLParagraphElement | null)[]>([]);
+  const companionRefs = useRef<(HTMLParagraphElement | null)[]>([]);
   const lineFillRef = useRef<HTMLSpanElement | null>(null);
   const wordFillRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const companionFillRefs = useRef<(HTMLSpanElement | null)[]>([]);
 
   const wordsByLineTime = useMemo(
     () => new Map((wordTimings ?? []).filter((l) => l.words.length > 0).map((l) => [l.t, l.words])),
     [wordTimings]
   );
   const currentLine = lines[currentIndex];
-  const currentWords = currentLine ? wordsByLineTime.get(currentLine.key) : undefined;
+  const currentWords = reliableWords(currentLine ? wordsByLineTime.get(currentLine.key) : undefined);
+  // Backing line sung at the same time (groupConcurrentLines guarantees it
+  // has word timings).
+  const companionWords = reliableWords(
+    currentLine?.companion ? wordsByLineTime.get(currentLine.companion.key) : undefined
+  );
 
   useEffect(() => {
     if (currentIndex < 0) return;
-    lineRefs.current[currentIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    rowRefs.current[currentIndex]?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [currentIndex]);
 
   // The line being sung never wraps (a break mid-line throws the singer
   // off): it's kept on one line and, if it's still wider than the lyrics
   // area, its font shrinks just enough to fit. Re-fitted on resize.
   useLayoutEffect(() => {
-    const el = lineRefs.current[currentIndex];
-    if (!el) return;
+    const elements = [lineRefs.current[currentIndex], companionRefs.current[currentIndex]].filter(
+      (el): el is HTMLParagraphElement => !!el
+    );
+    if (elements.length === 0) return;
     const fit = () => {
-      el.style.fontSize = "";
-      if (el.scrollWidth > el.clientWidth && el.clientWidth > 0) {
-        const base = parseFloat(getComputedStyle(el).fontSize);
-        el.style.fontSize = `${Math.floor((base * el.clientWidth) / el.scrollWidth) - 1}px`;
+      for (const el of elements) {
+        el.style.fontSize = "";
+        if (el.scrollWidth > el.clientWidth && el.clientWidth > 0) {
+          const base = parseFloat(getComputedStyle(el).fontSize);
+          el.style.fontSize = `${Math.floor((base * el.clientWidth) / el.scrollWidth) - 1}px`;
+        }
       }
     };
     fit();
     window.addEventListener("resize", fit);
     return () => {
       window.removeEventListener("resize", fit);
-      el.style.fontSize = "";
+      for (const el of elements) el.style.fontSize = "";
     };
-  }, [currentIndex, currentWords]);
+  }, [currentIndex, currentWords, companionWords]);
 
   // Updates fills through a CSS variable on each element every frame, rather
   // than through React state, so a 60fps animation doesn't re-render the
@@ -89,6 +102,7 @@ export function LyricsView({ lines, currentIndex, countdown, getPositionMs, word
       tick = () => {
         const position = getPositionMs();
         currentWords.forEach((word, i) => setFill(wordFillRefs.current[i], progress(position, word.s, word.e)));
+        companionWords?.forEach((word, i) => setFill(companionFillRefs.current[i], progress(position, word.s, word.e)));
       };
     } else {
       const next = lines.slice(currentIndex + 1).find((l) => l.timeMs > currentLine.timeMs);
@@ -104,13 +118,13 @@ export function LyricsView({ lines, currentIndex, countdown, getPositionMs, word
     };
     loop();
     return () => cancelAnimationFrame(frame);
-  }, [lines, currentIndex, currentLine, currentWords, getPositionMs]);
+  }, [lines, currentIndex, currentLine, currentWords, companionWords, getPositionMs]);
 
   if (lines.length === 0) return null;
 
   return (
     <div
-      className="relative h-96 w-full max-w-6xl overflow-y-scroll [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="relative h-[31.75rem] w-full max-w-7xl overflow-y-scroll [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       style={{ maskImage: "linear-gradient(to bottom, transparent, black 25%, black 75%, transparent)" }}
     >
       {countdown != null && (
@@ -120,43 +134,86 @@ export function LyricsView({ lines, currentIndex, countdown, getPositionMs, word
           </span>
         </div>
       )}
-      <div className="flex flex-col items-center gap-7 py-44">
-        {lines.map((line, i) => (
-          <p
-            key={i}
-            ref={(el) => {
-              lineRefs.current[i] = el;
-            }}
-            className={
-              i === currentIndex
-                ? "w-full whitespace-nowrap text-center text-[2.025rem] leading-tight font-bold text-foreground transition-colors duration-300"
-                : "text-center text-[1.52rem] leading-snug font-semibold text-foreground/40 transition-colors duration-300"
-            }
-          >
-            {i !== currentIndex || !line.text ? (
-              line.text || "…"
-            ) : currentWords ? (
-              currentWords.map((word, w) => (
-                <span key={w}>
-                  {w > 0 && " "}
-                  <span
-                    ref={(el) => {
-                      wordFillRefs.current[w] = el;
-                    }}
-                    className="lyric-fill"
-                  >
-                    {word.w}
+      <div className="flex flex-col items-center gap-9 py-[14.75rem]">
+        {lines.map((line, i) => {
+          const current = i === currentIndex;
+          return (
+            <div
+              key={i}
+              ref={(el) => {
+                rowRefs.current[i] = el;
+              }}
+              className="flex w-full flex-col items-center gap-1"
+            >
+              <p
+                ref={(el) => {
+                  lineRefs.current[i] = el;
+                }}
+                className={
+                  current
+                    ? "w-full whitespace-nowrap text-center text-[2.68rem] leading-tight font-bold text-foreground transition-colors duration-300"
+                    : "text-center text-[2.01rem] leading-snug font-semibold text-foreground/40 transition-colors duration-300"
+                }
+              >
+                {!current || !line.text ? (
+                  line.text || "…"
+                ) : currentWords ? (
+                  <FilledWords words={currentWords} refs={wordFillRefs} className="lyric-fill" />
+                ) : (
+                  <span ref={lineFillRef} className="lyric-fill">
+                    {line.text}
                   </span>
-                </span>
-              ))
-            ) : (
-              <span ref={lineFillRef} className="lyric-fill">
-                {line.text}
-              </span>
-            )}
-          </p>
-        ))}
+                )}
+              </p>
+              {/* A backing vocal sung over this line: shown right under it,
+                  a little smaller and in a lighter pink, filling on its own
+                  timing. */}
+              {line.companion && (
+                <p
+                  ref={(el) => {
+                    companionRefs.current[i] = el;
+                  }}
+                  className={
+                    current
+                      ? "w-full whitespace-nowrap text-center text-[2.12rem] leading-tight font-semibold italic text-foreground transition-colors duration-300"
+                      : "text-center text-[1.66rem] leading-snug font-semibold italic text-foreground/30 transition-colors duration-300"
+                  }
+                >
+                  {current && companionWords ? (
+                    <FilledWords words={companionWords} refs={companionFillRefs} className="lyric-fill lyric-fill-backing" />
+                  ) : (
+                    line.companion.text
+                  )}
+                </p>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
+}
+
+function FilledWords({
+  words,
+  refs,
+  className,
+}: {
+  words: AlignedWord[];
+  refs: React.RefObject<(HTMLSpanElement | null)[]>;
+  className: string;
+}) {
+  return words.map((word, w) => (
+    <span key={w}>
+      {w > 0 && " "}
+      <span
+        ref={(el) => {
+          refs.current[w] = el;
+        }}
+        className={className}
+      >
+        {word.w}
+      </span>
+    </span>
+  ));
 }

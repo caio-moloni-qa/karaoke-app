@@ -51,6 +51,12 @@ export interface Song {
   created_at: string;
 }
 
+// The worker's automatic lyrics-sync check (apps/worker/pipeline/sync_check.py).
+export interface SyncCheck {
+  status: "ok" | "warn" | "fail";
+  issues: { code: string; message: string; lines?: string[] }[];
+}
+
 export interface Stem {
   id: string;
   song_id: string;

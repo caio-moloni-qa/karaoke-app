@@ -7,6 +7,9 @@ export interface LrcLine {
   key: number;
   // Set on lines expanded from a repeat marker ("Go away (x8)" -> 8 lines).
   repeat?: { index: number; count: number };
+  // A backing-vocal line sung at the same time as this one: shown together,
+  // under it, both filling on their own timing (see groupConcurrentLines).
+  companion?: LrcLine;
 }
 
 // Per-word timing for a line, from the worker's forced alignment against the
@@ -81,22 +84,74 @@ export function parseLrc(lrc: string): LrcLine[] {
   return lines;
 }
 
+// With long, slurred singing (e.g. Deftones' "Be Quiet and Drive") the
+// aligner can't find word boundaries and stretches single words over
+// several seconds. A word that long anywhere but the end of a line (where a
+// held note is normal) means the line's word timings can't be trusted: it
+// keeps its LRC time and fills as a whole line.
+const MAX_WORD_MS = 2500;
+
+export function reliableWords(words: AlignedWord[] | undefined): AlignedWord[] | undefined {
+  if (!words?.length) return undefined;
+  return words.slice(0, -1).some((word) => word.e - word.s > MAX_WORD_MS) ? undefined : words;
+}
+
 // How early a line lights up before its first sung word.
 const LEAD_MS = 300;
 
-// Repeated lines get evenly spaced guesses from parseLrc; with word timings,
-// each one starts just before its first sung word instead, so every
-// repetition highlights when it's actually sung. Other lines keep their LRC
-// time. Never moves a line before the one above it.
+// Lyrics sites' line times are hand-made and often off by a second or more
+// (Decode's first line is sung 2 s before its timestamp, which also threw off
+// the 3-2-1 countdown). With trustworthy word timings, every line starts just
+// before its first sung word instead — repeated lines too, whose parseLrc
+// times are only evenly spaced guesses. Other lines keep their LRC time.
+// Never moves a line before the one above it.
 export function applyAlignedStarts(lines: LrcLine[], aligned: AlignedLine[]): LrcLine[] {
   const wordsByKey = new Map(aligned.map((line) => [line.t, line.words]));
   let previous = -Infinity;
   return lines.map((line) => {
-    const words = line.repeat ? wordsByKey.get(line.key) : undefined;
-    const timeMs = words?.length ? Math.max(previous, words[0].s - LEAD_MS) : line.timeMs;
+    const words = reliableWords(wordsByKey.get(line.key));
+    const timeMs = Math.max(previous, words ? words[0].s - LEAD_MS : line.timeMs);
     previous = timeMs;
     return { ...line, timeMs };
   });
+}
+
+// A line written fully in parentheses: the usual way lyrics mark a backing
+// vocal. Same rule as apps/worker/pipeline/align.py, which aligns these on
+// the backing stem so they can overlap the lead line in time.
+export function isBackingLine(text: string): boolean {
+  const stripped = text.trim();
+  return stripped.length > 2 && stripped.startsWith("(") && stripped.endsWith(")");
+}
+
+// Words may start this long after the lead line's last word and still count
+// as sung together (the backing usually comes in just before the lead ends).
+const CONCURRENT_TOLERANCE_MS = 400;
+
+// Lyrics list a lead line and its backing vocal one after the other, even
+// when they're sung over each other. With word timings, a backing line whose
+// first word comes before the lead line above it has finished is folded into
+// that line as its companion, so the stage shows and fills both at once.
+// Backing lines sung on their own stay separate lines.
+export function groupConcurrentLines(lines: LrcLine[], aligned: AlignedLine[]): LrcLine[] {
+  const wordsByKey = new Map(aligned.map((line) => [line.t, line.words]));
+  const rows: LrcLine[] = [];
+  for (const line of lines) {
+    const previous = rows[rows.length - 1];
+    const words = wordsByKey.get(line.key);
+    const previousWords = previous ? wordsByKey.get(previous.key) : undefined;
+    const sungTogether =
+      previous &&
+      !previous.companion &&
+      isBackingLine(line.text) &&
+      !isBackingLine(previous.text) &&
+      words?.length &&
+      previousWords?.length &&
+      words[0].s < previousWords[previousWords.length - 1].e + CONCURRENT_TOLERANCE_MS;
+    if (sungTogether) rows[rows.length - 1] = { ...previous, companion: line };
+    else rows.push(line);
+  }
+  return rows;
 }
 
 export function currentLineIndex(lines: LrcLine[], positionMs: number): number {

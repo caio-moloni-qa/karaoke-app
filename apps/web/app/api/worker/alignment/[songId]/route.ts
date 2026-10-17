@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { isAuthorizedWorker } from "@/lib/workerAuth";
 import { lyricsHash, type AlignedLine } from "@/lib/lyricsAlignment";
+import type { SyncCheck } from "@/lib/types";
 
 interface AlignmentBody {
   hash: string;
   lines?: AlignedLine[];
   error?: string;
+  // apps/worker/pipeline/sync_check.py's verdict on these lyrics.
+  syncCheck?: SyncCheck;
 }
 
 // Stores the worker's word timings (or why aligning failed — recorded too,
@@ -19,7 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ son
   }
 
   const { songId } = await params;
-  const { hash, lines, error } = (await request.json()) as AlignmentBody;
+  const { hash, lines, error, syncCheck } = (await request.json()) as AlignmentBody;
 
   const supabase = createServiceRoleClient();
   const { data: lyrics } = await supabase.from("lyrics").select("raw_lrc, offset_ms").eq("song_id", songId).maybeSingle();
@@ -29,7 +32,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ son
 
   const { error: updateError } = await supabase
     .from("lyrics")
-    .update({ word_timings: error ? null : (lines ?? []), aligned_hash: hash, alignment_error: error ?? null })
+    .update({
+      word_timings: error ? null : (lines ?? []),
+      aligned_hash: hash,
+      alignment_error: error ?? null,
+      sync_check: syncCheck ?? null,
+    })
     .eq("song_id", songId);
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 

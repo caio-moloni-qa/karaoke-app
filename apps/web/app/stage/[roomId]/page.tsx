@@ -8,7 +8,7 @@ import { Loader2, Maximize, Minimize, Music2, Pause, Play, RotateCcw, SkipBack, 
 import { createBrowserClient } from "@/lib/supabase/browser";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
 import { useWorkerOnline } from "@/lib/useWorkerOnline";
-import { applyAlignedStarts, currentLineIndex, parseLrc, type AlignedLine, type LrcLine } from "@/lib/lrc";
+import { applyAlignedStarts, currentLineIndex, groupConcurrentLines, parseLrc, type AlignedLine, type LrcLine } from "@/lib/lrc";
 import { latestProcessingJob, SONG_STATUS_LABEL, type QueueItemWithSong, type StemType } from "@/lib/types";
 import { ProgressBar } from "@/components/ProgressBar";
 import { LyricsView } from "@/components/LyricsView";
@@ -186,7 +186,24 @@ export default function StagePage() {
   // Fetch signed stem URLs (+ lyrics, background, default mix) whenever the
   // now-playing song changes.
   useEffect(() => {
-    if (!nowPlaying || nowPlaying.song_id === currentSongIdRef.current) return;
+    // The song was taken off the stage from elsewhere (e.g. the queue was
+    // cleared from the control panel): stop it here too.
+    // (Same as unloadCurrentSong, inlined: effects can't call functions
+    // declared further down.)
+    if (!nowPlaying) {
+      if (currentSongIdRef.current) {
+        currentSongIdRef.current = null;
+        for (const { type } of TRACKS) audioRefs.current[type]?.pause();
+        setIsPlaying(false);
+        setStemUrls({});
+        setBackground(null);
+        setLyricsLines([]);
+        setSingingCountdown(null);
+        setLoadingSong(false);
+      }
+      return;
+    }
+    if (nowPlaying.song_id === currentSongIdRef.current) return;
     currentSongIdRef.current = nowPlaying.song_id;
     setIsPlaying(false);
     setLyricsLines([]);
@@ -206,7 +223,7 @@ export default function StagePage() {
           // LyricsView falls back to filling whole lines meanwhile. With
           // them, repeated lines ("(x8)") start exactly when each one is sung.
           const words: AlignedLine[] = data.lyrics.word_timings ?? [];
-          setLyricsLines(applyAlignedStarts(parseLrc(data.lyrics.raw_lrc), words));
+          setLyricsLines(groupConcurrentLines(applyAlignedStarts(parseLrc(data.lyrics.raw_lrc), words), words));
           setLyricsOffsetMs(data.lyrics.offset_ms ?? 0);
           setLyricsWords(words);
         }
@@ -485,13 +502,7 @@ export default function StagePage() {
     setClearingQueue(true);
     setTransitioning(true);
     try {
-      pause();
-      setStemUrls({});
-      setBackground(null);
-      setLyricsLines([]);
-      setSingingCountdown(null);
-      setLoadingSong(false);
-      currentSongIdRef.current = null;
+      unloadCurrentSong();
       await supabase
         .from("queue_items")
         .update({ status: "removed" })

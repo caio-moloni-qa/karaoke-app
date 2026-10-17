@@ -59,21 +59,19 @@ body {
   box-decoration-break: slice;
 }
 
+/* Backing vocal sung over the lead line: same fill, lighter pink, so the
+   two parts are easy to tell apart while both are filling. */
+.lyric-fill-backing {
+  background-image: linear-gradient(90deg, #f9a8d4, #f472b6),
+    linear-gradient(rgba(245, 245, 247, 0.75), rgba(245, 245, 247, 0.75));
+}
+
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
-}
-
-/* The YouTube IFrame API replaces its target div with an iframe carrying
-   fixed width/height attributes from creation time — this makes it fill
-   whatever size the wrapper is resized to instead (e.g. to exactly match
-   the thumbnail being previewed). */
-.youtube-preview-wrapper > iframe {
-  width: 100% !important;
-  height: 100% !important;
 }
 
 @keyframes spin {

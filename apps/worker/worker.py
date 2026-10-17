@@ -15,6 +15,7 @@ from pipeline.align import align_lyrics
 from pipeline.download import download_audio
 from pipeline.key_detect import detect_key
 from pipeline.separate import separate_stems
+from pipeline.sync_check import check_sync
 
 load_dotenv()
 
@@ -216,6 +217,12 @@ def align_next_song(song_id: str | None = None) -> bool:
         lines = align_lyrics(vocals, task["rawLrc"], task["offsetMs"])
         payload = {"hash": task["hash"], "lines": lines}
         print(f"Aligned lyrics word by word: {task['title']} ({len(lines)} lines)")
+        try:
+            payload["syncCheck"] = check_sync(vocals, task["rawLrc"], task["offsetMs"], lines)
+            if payload["syncCheck"]["status"] != "ok":
+                print(f"  Sync check: {payload['syncCheck']['status']} - " + "; ".join(i["message"] for i in payload["syncCheck"]["issues"]))
+        except Exception:
+            traceback.print_exc()
     except Exception as exc:
         traceback.print_exc()
         payload = {"hash": task["hash"], "error": str(exc)[:500]}

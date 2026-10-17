@@ -3,14 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronRight, Download, FolderOpen, ListMusic, Mic2, Monitor, Music2, Pencil, Plus, RefreshCw, Search, Sparkles, Upload, Volume2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Download, FolderOpen, ListMusic, Mic2, Monitor, Music2, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, Upload, Volume2, X } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/browser";
-import { useYoutubePreview } from "@/lib/useYoutubePreview";
 import { useRealtimeFallback } from "@/lib/useRealtimeFallback";
-import { latestProcessingJob, SONG_STATUS_LABEL, type QueueItemWithSong, type Song } from "@/lib/types";
+import type { QueueItemWithSong, Song, SyncCheck } from "@/lib/types";
 import type { YoutubeSearchResult } from "@/lib/youtube";
 import { parseCsv, toCsv } from "@/lib/csv";
-import { ProgressBar } from "@/components/ProgressBar";
 import { SpotifyIcon, YoutubeIcon } from "@/components/BrandIcons";
 import { ProcessingQueuePanel, type ProcessingJobRow } from "@/components/ProcessingQueuePanel";
 import { useWorkerOnline } from "@/lib/useWorkerOnline";
@@ -23,8 +21,13 @@ interface GuestSession {
   displayName: string;
 }
 
+interface LibraryLyrics {
+  song_id: string;
+  sync_check: SyncCheck | null;
+}
+
 interface LibrarySong extends Song {
-  lyrics: { song_id: string }[] | { song_id: string } | null;
+  lyrics: LibraryLyrics[] | LibraryLyrics | null;
 }
 
 interface StagedRow {
@@ -67,6 +70,23 @@ function hasLyrics(song: LibrarySong): boolean {
   return Array.isArray(song.lyrics) ? song.lyrics.length > 0 : !!song.lyrics;
 }
 
+// The worker's sync check, when it found something worth a look.
+function syncProblem(song: LibrarySong): SyncCheck | null {
+  const lyrics = Array.isArray(song.lyrics) ? song.lyrics[0] : song.lyrics;
+  const check = lyrics?.sync_check;
+  return check && check.status !== "ok" ? check : null;
+}
+
+function SyncWarning({ check }: { check: SyncCheck | null }) {
+  if (!check) return null;
+  const details = check.issues.map((issue) => `• ${issue.message}`).join("\n");
+  return (
+    <span title={`Sincronia da letra pode estar errada:\n${details}`}>
+      <AlertTriangle className={`h-3.5 w-3.5 shrink-0 ${check.status === "fail" ? "text-danger" : "text-amber-400"}`} />
+    </span>
+  );
+}
+
 function guestStorageKey(roomId: string) {
   return `karaoke:${roomId}:guest`;
 }
@@ -75,7 +95,10 @@ export default function RoomRemotePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const router = useRouter();
   const supabase = useMemo(() => createBrowserClient(), []);
-  const { preview, playerElementId, previewingVideoId } = useYoutubePreview();
+  // Spotify track whose embedded player is open under its search result.
+  const [previewTrackId, setPreviewTrackId] = useState<string | null>(null);
+  // Same for a YouTube result: its video plays in a small player under it.
+  const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
 
   // Starts null on both server and the client's first render so hydration
   // matches; the real value (if any) is only known after mount, since
@@ -121,11 +144,13 @@ export default function RoomRemotePage() {
   const [importResultMsg, setImportResultMsg] = useState<string | null>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
 
-  // Stage order: whatever's playing, then the rest in request order.
-  const orderedQueue = useMemo(
-    () => [...queue.filter((item) => item.status === "now_playing"), ...queue.filter((item) => item.status !== "now_playing")],
-    [queue]
-  );
+  // Stage order: whatever's playing, then the rest in request order. Songs
+  // still processing stay in the processing panel and only join the stage
+  // queue once ready (the stage skips them until then anyway).
+  const orderedQueue = useMemo(() => {
+    const ready = queue.filter((item) => item.songs?.status === "ready");
+    return [...ready.filter((item) => item.status === "now_playing"), ...ready.filter((item) => item.status !== "now_playing")];
+  }, [queue]);
 
   const [libraryFilter, setLibraryFilter] = useState("");
   const filteredLibrary = useMemo(() => {
@@ -180,7 +205,7 @@ export default function RoomRemotePage() {
   const loadLibrary = useCallback(async () => {
     const { data } = await supabase
       .from("songs")
-      .select("*, lyrics(song_id)")
+      .select("*, lyrics(song_id, sync_check)")
       .eq("status", "ready")
       .order("title", { ascending: true });
     setLibrary((data as LibrarySong[]) ?? []);
@@ -594,6 +619,24 @@ export default function RoomRemotePage() {
     }
   }
 
+  // Takes every request off the stage queue, including the song playing now
+  // (the stage notices and stops). Songs stay in the library.
+  const [clearingStage, setClearingStage] = useState(false);
+  async function clearStageQueue() {
+    if (!window.confirm("Limpar a fila do palco? Isso remove os pedidos de todo mundo, inclusive a música tocando agora.")) return;
+    setClearingStage(true);
+    try {
+      await supabase
+        .from("queue_items")
+        .update({ status: "removed" })
+        .eq("room_id", roomId)
+        .in("status", ["queued", "now_playing"]);
+      await loadQueue();
+    } finally {
+      setClearingStage(false);
+    }
+  }
+
   async function clearProcessing(): Promise<string> {
     if (!guest) return "";
     try {
@@ -672,14 +715,24 @@ export default function RoomRemotePage() {
   }
 
   let upNextPosition = 0;
+  const clearStageButton = orderedQueue.length > 0 && (
+    <Button
+      variant="ghost"
+      icon={<Trash2 className="h-3.5 w-3.5" />}
+      loading={clearingStage}
+      onClick={clearStageQueue}
+      className="h-7 px-2 text-xs font-normal normal-case text-danger"
+    >
+      Limpar
+    </Button>
+  );
+
   const queueList =
     orderedQueue.length === 0 ? (
       <p className="text-sm text-muted">Fila vazia.</p>
     ) : (
       <ul className="flex flex-col gap-2">
         {orderedQueue.map((item) => {
-          const job = latestProcessingJob(item.songs?.processing_jobs);
-          const isProcessing = item.songs && item.songs.status !== "ready" && item.songs.status !== "failed";
           const nowPlaying = item.status === "now_playing";
           const position = nowPlaying ? null : ++upNextPosition;
           return (
@@ -702,11 +755,7 @@ export default function RoomRemotePage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{item.songs?.title}</p>
                   <p className="truncate text-xs text-muted">
-                    {nowPlaying
-                      ? "Tocando agora"
-                      : item.songs && item.songs.status !== "ready"
-                        ? (job?.stage_label ?? SONG_STATUS_LABEL[item.songs.status])
-                        : "Na fila"}
+                    {nowPlaying ? "Tocando agora" : "Na fila"}
                     {" · pedido por "}
                     {item.guests?.display_name ?? "?"}
                   </p>
@@ -722,7 +771,6 @@ export default function RoomRemotePage() {
                   />
                 )}
               </div>
-              {isProcessing && job && <ProgressBar percent={job.progress_pct} />}
             </li>
           );
         })}
@@ -732,7 +780,8 @@ export default function RoomRemotePage() {
   return (
     // Wide screens get the worker's processing queue on the left and the
     // stage queue on the right; below xl the side columns would be too
-    // narrow to be useful, so it stays the single phone-shaped column.
+    // narrow to be useful, so both move into the single phone-shaped column
+    // (stage queue first, then processing).
     <div className="min-h-screen xl:grid xl:grid-cols-[minmax(0,1fr)_28rem_minmax(0,1fr)] xl:gap-8 xl:px-8">
     <aside className="hidden xl:block">
       <div className="sticky top-0 flex h-screen justify-end py-8">
@@ -748,14 +797,6 @@ export default function RoomRemotePage() {
       </div>
     </aside>
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-8 px-5 py-8 xl:px-0">
-      {/* Small (not 0x0) and tucked in a corner rather than fully hidden —
-          mobile browsers are much more aggressive about blocking
-          autoplay-with-sound on hidden/zero-size iframes, even from a
-          direct tap, so this stays real but easy to miss. The "now
-          previewing" feedback is the pink pulse on the button instead. */}
-      <div className="youtube-preview-wrapper fixed bottom-3 right-3 z-20 h-6 w-10 overflow-hidden rounded-md opacity-60">
-        <div id={playerElementId} />
-      </div>
 
       <header className="flex items-center justify-between gap-3">
         <div>
@@ -772,10 +813,23 @@ export default function RoomRemotePage() {
 
       {/* On wide screens the queue lives in the right column instead. */}
       <section className="flex flex-col gap-3 xl:hidden">
-        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted">
-          <ListMusic className="h-4 w-4" /> Fila do palco
+        <h2 className="flex items-center justify-between gap-2 text-sm font-semibold uppercase tracking-wide text-muted">
+          <span className="flex items-center gap-2">
+            <ListMusic className="h-4 w-4" /> Fila do palco
+          </span>
+          {clearStageButton}
         </h2>
         {queueList}
+      </section>
+
+      <section className="xl:hidden">
+        <ProcessingQueuePanel
+          active={processingActive}
+          failed={processingFailed}
+          workerOnline={workerOnline}
+          onClear={clearProcessing}
+          onClearFailed={clearFailedProcessing}
+        />
       </section>
 
       <section className="flex flex-col gap-3">
@@ -809,22 +863,44 @@ export default function RoomRemotePage() {
             <ul className="flex flex-col gap-1.5">
               {spotifyResults.tracks.map((track) => {
                 const added = stagedKeys.has(stagedKey(track.artist, track.title));
+                const previewing = previewTrackId === track.id;
                 return (
-                  <li key={track.id} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2">
-                    <SpotifyThumb url={track.imageUrl} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{track.title}</p>
-                      <p className="truncate text-xs text-muted">
-                        {track.artist} · {track.albumName}
-                      </p>
+                  <li key={track.id} className="flex flex-col gap-2 rounded-xl border border-border bg-surface px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <SpotifyThumb url={track.imageUrl} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{track.title}</p>
+                        <p className="truncate text-xs text-muted">
+                          {track.artist} · {track.albumName}
+                        </p>
+                      </div>
+                      <IconButton
+                        variant={previewing ? "primary" : "ghost"}
+                        icon={<Volume2 className="h-4 w-4" />}
+                        aria-label={previewing ? "Fechar prévia" : "Ouvir prévia"}
+                        onClick={() => setPreviewTrackId(previewing ? null : track.id)}
+                      />
+                      <IconButton
+                        variant={added ? "ghost" : "secondary"}
+                        icon={added ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                        aria-label={added ? "Já está na lista" : "Adicionar à lista"}
+                        disabled={added}
+                        onClick={() => addStagedRows([track])}
+                      />
                     </div>
-                    <IconButton
-                      variant={added ? "ghost" : "secondary"}
-                      icon={added ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                      aria-label={added ? "Já está na lista" : "Adicionar à lista"}
-                      disabled={added}
-                      onClick={() => addStagedRows([track])}
-                    />
+                    {/* Spotify's own compact player: a 30s preview, or the
+                        full track if this browser is logged in to Spotify.
+                        Unlike YouTube's embed it also plays on phones that
+                        reach the app by LAN IP. */}
+                    {previewing && (
+                      <iframe
+                        src={`https://open.spotify.com/embed/track/${track.id}?theme=0`}
+                        title={`Prévia: ${track.artist} - ${track.title}`}
+                        className="h-20 w-full rounded-xl border-0"
+                        allow="autoplay; clipboard-write; encrypted-media"
+                        loading="lazy"
+                      />
+                    )}
                   </li>
                 );
               })}
@@ -951,32 +1027,50 @@ export default function RoomRemotePage() {
               </Button>
             </div>
             <ul className="flex flex-col gap-2">
-              {searchResults.map((result) => (
-                <li key={result.videoId} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
-                  {result.thumbnailUrl && (
-                    // eslint-disable-next-line @next/next/no-img-element -- thumbnails are external, unsized YouTube URLs
-                    <img src={result.thumbnailUrl} alt="" className="h-12 w-16 shrink-0 rounded-lg object-cover" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{result.title}</p>
-                    <p className="truncate text-xs text-muted">{result.channelTitle}</p>
-                  </div>
-                  {/* Doesn't work on mobile accessed via the LAN IP — see
-                      the "Known limitation" note in useYoutubePreview.ts. */}
-                  <IconButton
-                    variant={previewingVideoId === result.videoId ? "primary" : "ghost"}
-                    icon={<Volume2 className={previewingVideoId === result.videoId ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />}
-                    aria-label="Ouvir prévia de 5s"
-                    onClick={() => preview(result.videoId, result.durationSeconds)}
-                  />
-                  <IconButton
-                    icon={<Plus className="h-4 w-4" />}
-                    aria-label="Adicionar à fila"
-                    loading={pendingVideoIds.has(result.videoId)}
-                    onClick={() => requestSong(result)}
-                  />
-                </li>
-              ))}
+              {searchResults.map((result) => {
+                const previewing = previewVideoId === result.videoId;
+                return (
+                  <li key={result.videoId} className="flex flex-col gap-2 rounded-xl border border-border bg-surface px-3 py-2.5">
+                    <div className="flex items-center gap-3">
+                      {result.thumbnailUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element -- thumbnails are external, unsized YouTube URLs
+                        <img src={result.thumbnailUrl} alt="" className="h-12 w-16 shrink-0 rounded-lg object-cover" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{result.title}</p>
+                        <p className="truncate text-xs text-muted">{result.channelTitle}</p>
+                      </div>
+                      <IconButton
+                        variant={previewing ? "primary" : "ghost"}
+                        icon={<Volume2 className="h-4 w-4" />}
+                        aria-label={previewing ? "Fechar prévia" : "Ver prévia"}
+                        onClick={() => setPreviewVideoId(previewing ? null : result.videoId)}
+                      />
+                      <IconButton
+                        icon={<Plus className="h-4 w-4" />}
+                        aria-label="Adicionar à fila"
+                        loading={pendingVideoIds.has(result.videoId)}
+                        onClick={() => requestSong(result)}
+                      />
+                    </div>
+                    {/* Small player under the result, starting mid-video to
+                        skip intros, so you can see which version this is
+                        (official clip, live, lyrics video...). Known
+                        limitation: YouTube refuses embeds on pages opened by
+                        bare LAN IP on mobile ("video unavailable"); on the
+                        host PC (localhost) it plays fine. */}
+                    {previewing && (
+                      <iframe
+                        src={`https://www.youtube-nocookie.com/embed/${result.videoId}?autoplay=1&start=${Math.floor(result.durationSeconds / 2)}&rel=0`}
+                        title={`Prévia: ${result.title}`}
+                        className="aspect-video w-full max-w-sm rounded-xl border-0"
+                        allow="autoplay; encrypted-media; picture-in-picture"
+                        allowFullScreen
+                      />
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </>
         )}
@@ -1130,6 +1224,7 @@ export default function RoomRemotePage() {
                       className="h-6 w-6 shrink-0"
                     />
                   )}
+                  <SyncWarning check={syncProblem(song)} />
                 </div>
                 {song.artist_guess && <p className="truncate text-xs text-muted">{song.artist_guess}</p>}
               </div>
@@ -1171,7 +1266,10 @@ export default function RoomRemotePage() {
             <span className="flex items-center gap-2">
               <ListMusic className="h-4 w-4" /> Fila do palco
             </span>
-            {queue.length > 0 && <span className="text-xs font-normal normal-case">{queue.length} música(s)</span>}
+            <span className="flex items-center gap-2">
+              {orderedQueue.length > 0 && <span className="text-xs font-normal normal-case">{orderedQueue.length} música(s)</span>}
+              {clearStageButton}
+            </span>
           </h2>
           <div className="flex-1 overflow-y-auto">{queueList}</div>
         </div>

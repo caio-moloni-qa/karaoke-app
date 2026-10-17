@@ -29,6 +29,16 @@ _UNSUPPORTED_SCRIPT = re.compile(r"[぀-ヿ㐀-鿿가-힯Ѐ-ӿ֐-ۿ฀-๿]")
 # hand-made and often slightly early or late.
 _PAD_BEFORE_MS = 300
 _PAD_AFTER_MS = 300
+# Lyrics sites sometimes time a line late (Decode's first line is sung 2 s
+# before its timestamp). When a lead line's first word lands right at the
+# start of its window — the singing likely began before it — the line is
+# aligned again with a window reaching this much further back, but never past
+# where the previous lead line's singing ended, so it can't take that line's
+# words. (Always looking back pulls correctly-timed lines early: the model
+# happily maps the end of the previous phrase onto a line's first words.)
+# The stage then starts each line at its first word.
+_LOOKBACK_MS = 4000
+_PINNED_MS = 150
 # A line's window runs to the next line's start, but before a guitar solo
 # that's a minute or more of audio — and the model's cost grows with the
 # square of the window length (one such song took 5+ minutes). Singing a
@@ -96,6 +106,13 @@ def parse_lrc(raw: str) -> list[dict]:
     return lines
 
 
+def _is_backing(text: str) -> bool:
+    """A line written fully in parentheses: the usual way lyrics mark a
+    backing vocal ("(You'll see it's not meant to be)")."""
+    stripped = text.strip()
+    return len(stripped) > 2 and stripped.startswith("(") and stripped.endswith(")")
+
+
 def _normalize(word: str) -> str:
     return re.sub(r"[^a-z']", "", unidecode(word).lower()).strip("'")
 
@@ -149,14 +166,18 @@ def align_lyrics(vocal_paths: list[str], raw_lrc: str, offset_ms: int) -> list[d
     aligner = _BUNDLE.get_aligner()
 
     waveform = _load_vocals(vocal_paths)
+    # Backing-vocal lines (in parentheses) are aligned against the backing
+    # stem alone (vocal_paths is [lead, backing]): they're often sung over
+    # the lead line, and on their own stem they can't be confused with it.
+    backing_waveform = _load_vocals(vocal_paths[1:]) if len(vocal_paths) > 1 else waveform
     total_ms = waveform.shape[1] * 1000 / _SAMPLE_RATE
 
-    def align_window(line_ms: int, end_ms: float, tokens: list[list[str]]) -> list[dict] | None:
+    def align_window(wave: torch.Tensor, line_ms: float, end_ms: float, tokens: list[list[str]]) -> list[dict] | None:
         """Word timings for `tokens` sung between line_ms and end_ms (LRC
         timeline), or None if this stretch can't be aligned."""
         start = max(0.0, line_ms + offset_ms - _PAD_BEFORE_MS)
         end = min(total_ms, end_ms + offset_ms + _PAD_AFTER_MS)
-        segment = waveform[:, int(start * _SAMPLE_RATE / 1000) : int(end * _SAMPLE_RATE / 1000)]
+        segment = wave[:, int(start * _SAMPLE_RATE / 1000) : int(end * _SAMPLE_RATE / 1000)]
         if segment.shape[1] < _SAMPLE_RATE // 5:
             return None
         try:
@@ -178,6 +199,10 @@ def align_lyrics(vocal_paths: list[str], raw_lrc: str, offset_ms: int) -> list[d
         ]
 
     results = []
+    # Where the previous lead line's singing ended (LRC timeline): None before
+    # the first lead line, -1 when that line couldn't be aligned (no lookback
+    # then, since there's no telling where its singing stops).
+    previous_lead_end: float | None = None
     for i, line in enumerate(lines):
         line_ms, text = line["t"], line["text"]
         if not text or _UNSUPPORTED_SCRIPT.search(text):
@@ -195,16 +220,42 @@ def align_lyrics(vocal_paths: list[str], raw_lrc: str, offset_ms: int) -> list[d
             group_start, count, group_end = group
             if line_ms != group_start:
                 continue
-            words = align_window(group_start, min(group_end, group_start + window_ms * count), tokens * count)
+            words = align_window(waveform, group_start, min(group_end, group_start + window_ms * count), tokens * count)
             if words:
                 entries = [entry for entry in lines if entry.get("group") == group]
                 for k, entry in enumerate(entries):
                     results.append({"t": entry["t"], "words": words[k * len(tokens) : (k + 1) * len(tokens)]})
+            previous_lead_end = words[-1]["e"] if words else -1
             continue
 
-        next_ms = next((entry["t"] for entry in lines[i + 1 :] if entry["t"] > line_ms), None)
-        line_end = line_ms + window_ms if next_ms is None else min(next_ms, line_ms + window_ms)
-        words = align_window(line_ms, line_end, tokens)
+        if _is_backing(text):
+            # May be sung over the lead line above it, so the window starts
+            # with that line rather than at this line's own LRC time; the
+            # stage shows the two together when their words overlap.
+            previous = next((entry for entry in reversed(lines[:i]) if entry["text"] and not _is_backing(entry["text"])), None)
+            window_start = previous["t"] if previous and line_ms - previous["t"] <= _MAX_WINDOW_MS else line_ms
+            next_ms = next((entry["t"] for entry in lines[i + 1 :] if entry["t"] > line_ms), None)
+            window_end = line_ms + window_ms if next_ms is None else min(next_ms, line_ms + window_ms)
+            words = align_window(backing_waveform, window_start, window_end, tokens)
+        else:
+            # Runs to the next lead line: a backing line in between may be
+            # sung while this one is still going.
+            next_ms = next(
+                (entry["t"] for entry in lines[i + 1 :] if entry["t"] > line_ms and not _is_backing(entry["text"])),
+                None,
+            )
+            line_end = line_ms + window_ms if next_ms is None else min(next_ms, line_ms + window_ms)
+            words = align_window(waveform, line_ms, line_end, tokens)
+            pinned = words and words[0]["s"] - (line_ms - _PAD_BEFORE_MS) <= _PINNED_MS
+            if pinned and previous_lead_end != -1:
+                lookback_start = max(0, line_ms - _LOOKBACK_MS)
+                if previous_lead_end is not None:
+                    lookback_start = max(lookback_start, previous_lead_end)
+                if lookback_start < line_ms - _PAD_BEFORE_MS:
+                    earlier = align_window(waveform, lookback_start, line_end, tokens)
+                    if earlier and earlier[0]["s"] < words[0]["s"] - _PAD_BEFORE_MS:
+                        words = earlier
+            previous_lead_end = words[-1]["e"] if words else -1
         if words:
             results.append({"t": line_ms, "words": words})
     return results
